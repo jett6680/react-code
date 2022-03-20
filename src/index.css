@@ -1,0 +1,34 @@
+@keyframes slide {
+    0% {
+        margin-left: 0;
+        /* transform: translateX(0); */
+    }
+
+    50% {
+        margin-left: 200px;
+        /* transform: translateX(200px); */
+    }
+
+    100% {
+        margin-left: 0;
+        /* transform: translateX(0); */
+    }
+}
+
+.wrapper {
+    width: 400px;
+    animation-duration: 3s;
+    animation-name: slide;
+    animation-iteration-count: infinite;
+    display: flex;
+    flex-wrap: wrap;
+    background: red;
+}
+
+.item {
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    border: 1px solid #aaa;
+}
