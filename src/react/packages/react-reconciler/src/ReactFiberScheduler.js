@@ -2221,6 +2221,8 @@ function shouldYieldToRenderer() {
 function performAsyncWork() {
   try {
     if (!shouldYieldToRenderer()) {
+      // 如果进入到此回调
+      // 说明当前执行的回调已经超时,也就是说最近的更新过期了
       // The callback timed out. That means at least one update has expired.
       // Iterate through the root schedule. If they contain expired work, set
       // the next render expiration time to the current time. This has the effect

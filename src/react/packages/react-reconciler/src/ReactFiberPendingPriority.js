@@ -243,6 +243,7 @@ export function didExpireAtExpirationTime(
   const expirationTime = root.expirationTime;
   if (expirationTime !== NoWork && currentTime <= expirationTime) {
     // The root has expired. Flush all work up to the current time.
+    // FiberRoot的更新已过期。将nextExpirationTimeToWorkOn设置到当前时间。
     root.nextExpirationTimeToWorkOn = currentTime;
   }
 }
