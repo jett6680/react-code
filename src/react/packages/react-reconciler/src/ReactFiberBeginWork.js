@@ -289,6 +289,7 @@ function updateForwardRef(
 
   if (current !== null && !didReceiveUpdate) {
     bailoutHooks(current, workInProgress, renderExpirationTime);
+    // 如果在当前帧没有更新，会跳过当前节点的更新
     return bailoutOnAlreadyFinishedWork(
       current,
       workInProgress,
@@ -298,12 +299,14 @@ function updateForwardRef(
 
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
+  // 根据JSXElement生产Fiber对象
   reconcileChildren(
     current,
     workInProgress,
     nextChildren,
     renderExpirationTime,
   );
+  // 将当前链表的下一个几点也就是child返回到workLoop继续调用
   return workInProgress.child;
 }
 
@@ -316,6 +319,8 @@ function updateMemoComponent(
   renderExpirationTime: ExpirationTime,
 ): null | Fiber {
   if (current === null) {
+    // Component 就是React.memo函数返回的那个ReactElement
+    // type属性就是React.memo包裹的组件
     let type = Component.type;
     if (
       isSimpleFunctionComponent(type) &&
@@ -326,6 +331,9 @@ function updateMemoComponent(
       // If this is a plain function component without default props,
       // and with only the default shallow comparison, we upgrade it
       // to a SimpleMemoComponent to allow fast path updates.
+      // 如果是一个简单的memo函数组件,其实当前memo节点并不会有实质的dom
+      // 节点的渲染，应该需要调和的是memo包裹的函数组件,所以在这里将type
+      // 更新到memo的fiber对象上,也就是函数组件和memo函数组件就是公用一个Fiber
       workInProgress.tag = SimpleMemoComponent;
       workInProgress.type = type;
       if (__DEV__) {
@@ -354,6 +362,7 @@ function updateMemoComponent(
         );
       }
     }
+    // 不符合上面的条件，直接创建Fiber
     let child = createFiberFromTypeAndProps(
       Component.type,
       null,
@@ -384,6 +393,9 @@ function updateMemoComponent(
   }
   let currentChild = ((current.child: any): Fiber); // This is always exactly one child
   if (updateExpirationTime < renderExpirationTime) {
+    // updateExpirationTime < renderExpirationTime 说明当前函数组件
+    // 渲染的优先级比较低，并不需要在这次更新中渲染，这个时候会先判断新老props
+    // 如果没有改变， 那么提前在这一次渲染将这个组件的更新跳过
     // This will be the props with resolved defaultProps,
     // unlike current.memoizedProps which will be the unresolved ones.
     const prevProps = currentChild.memoizedProps;
@@ -400,6 +412,7 @@ function updateMemoComponent(
   }
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
+  // 创建Fiber,进行更新
   let newChild = createWorkInProgress(
     currentChild,
     nextProps,
@@ -448,6 +461,8 @@ function updateSimpleMemoComponent(
     }
   }
   if (current !== null) {
+    // 说明不是第一次渲染，这个时候会对新老props进行浅比较
+    // 如果浅比较相等，也就是新老props没有变化，那么会跳过当前组件的更新
     const prevProps = current.memoizedProps;
     if (
       shallowEqual(prevProps, nextProps) &&
@@ -463,6 +478,7 @@ function updateSimpleMemoComponent(
       }
     }
   }
+  // 否则的话，直接调和函数式组件
   return updateFunctionComponent(
     current,
     workInProgress,
@@ -591,6 +607,9 @@ function updateFunctionComponent(
     }
     setCurrentPhase(null);
   } else {
+    // 调用 renderWithHooks ，将函数式组件渲染，返回一个JSXElement
+    // 然后调用reconcileChildren将其变成Fiber对象
+    // renderWithHooks 在后续看hook得实现的详细阅读
     nextChildren = renderWithHooks(
       current,
       workInProgress,
@@ -603,6 +622,7 @@ function updateFunctionComponent(
 
   if (current !== null && !didReceiveUpdate) {
     bailoutHooks(current, workInProgress, renderExpirationTime);
+    // 在当前帧没有更新则跳过当前节点的更新
     return bailoutOnAlreadyFinishedWork(
       current,
       workInProgress,
@@ -612,12 +632,14 @@ function updateFunctionComponent(
 
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
+  // 根据函数组件返回的JSXElement生成Fiber对象
   reconcileChildren(
     current,
     workInProgress,
     nextChildren,
     renderExpirationTime,
   );
+  // 将当前节点的child返回到workLoop继续调用
   return workInProgress.child;
 }
 
@@ -657,9 +679,13 @@ function updateClassComponent(
   }
   prepareToReadContext(workInProgress, renderExpirationTime);
 
+  // workInProgress 的 stateNode 就是当前类组件的实例
+  // 比如你的组件是 class A, 那 instance = new A()
   const instance = workInProgress.stateNode;
+  // 标记当前class组件是否应该进行更新
   let shouldUpdate;
   if (instance === null) {
+    // instance === null 说明当前类没有被实例化，是第一次mount
     if (current !== null) {
       // An class component without an instance only mounts if it suspended
       // inside a non- concurrent tree, in an inconsistent state. We want to
@@ -671,12 +697,20 @@ function updateClassComponent(
       workInProgress.effectTag |= Placement;
     }
     // In the initial pass we might need to construct the instance.
+    // 主要做了2件事，
+    // 1. 实例化类组件
+    // 2. 设置当前类组件的更新器，主要是setState方法的实现
     constructClassInstance(
       workInProgress,
       Component,
       nextProps,
       renderExpirationTime,
     );
+    // 主要做了一下几件事
+    // 1.执行updateQueue
+    // 2.执行getDerivedStateFromProps静态方法
+    // 3.如果存在callComponentWillMount生命周期，就执行
+    // 2.3 是互斥的
     mountClassInstance(
       workInProgress,
       Component,
@@ -837,6 +871,7 @@ function pushHostRootContext(workInProgress) {
 
 function updateHostRoot(current, workInProgress, renderExpirationTime) {
   pushHostRootContext(workInProgress);
+  // 取出RootFiber上的updateQueue
   const updateQueue = workInProgress.updateQueue;
   invariant(
     updateQueue !== null,
@@ -847,6 +882,7 @@ function updateHostRoot(current, workInProgress, renderExpirationTime) {
   const nextProps = workInProgress.pendingProps;
   const prevState = workInProgress.memoizedState;
   const prevChildren = prevState !== null ? prevState.element : null;
+  // 执行updateQueue
   processUpdateQueue(
     workInProgress,
     updateQueue,
@@ -854,10 +890,15 @@ function updateHostRoot(current, workInProgress, renderExpirationTime) {
     null,
     renderExpirationTime,
   );
+  // HostRoot就是root节点，也就是RootFiber,通过ReactDOM.render产生的
+  // 在updateQueue上存的就是App类组件的ReactElement
+  // 执行完updateQueue后，会将App类组件的state赋值给 memoizedState
   const nextState = workInProgress.memoizedState;
   // Caution: React DevTools currently depends on this property
   // being called "element".
+  // 这里取到的nextChildren就是App类组件的ReactElement
   const nextChildren = nextState.element;
+  // 如果前后节点相同，就走跳过节点更新的逻辑
   if (nextChildren === prevChildren) {
     // If the state is the same as before, that's a bailout because we had
     // no work that expires at this time.
@@ -897,6 +938,7 @@ function updateHostRoot(current, workInProgress, renderExpirationTime) {
   } else {
     // Otherwise reset hydration state in case we aborted and resumed another
     // root.
+    // 调和App节点，生成Fiber
     reconcileChildren(
       current,
       workInProgress,
@@ -920,6 +962,7 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
   const prevProps = current !== null ? current.memoizedProps : null;
 
   let nextChildren = nextProps.children;
+  // 判断否是纯文本或者 dangerouslySetInnerHTML，也就是里面的内容不需要React渲染
   const isDirectTextChild = shouldSetTextContent(type, nextProps);
 
   if (isDirectTextChild) {
@@ -931,6 +974,8 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
   } else if (prevProps !== null && shouldSetTextContent(type, prevProps)) {
     // If we're switching from a direct text child to a normal child, or to
     // empty, we need to schedule the text content to be reset.
+    // 老的props不是空，并且老的节点是文本节点或者 dangerouslySetInnerHTML
+    // 是的话，需要打上内容重置的tag，
     workInProgress.effectTag |= ContentReset;
   }
 
@@ -942,6 +987,8 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
     workInProgress.mode & ConcurrentMode &&
     shouldDeprioritizeSubtree(type, nextProps)
   ) {
+    // 如果ConcurrentMode下，有节点设置了hidden属性，那么当前节点以及以下
+    // 永远不会被React渲染
     // Schedule this fiber to re-render at offscreen priority. Then bailout.
     workInProgress.expirationTime = workInProgress.childExpirationTime = Never;
     return null;
@@ -1195,6 +1242,7 @@ function mountIndeterminateComponent(
       renderExpirationTime,
     );
   } else {
+    // 调用函数式组件，处理hooks
     value = renderWithHooks(
       null,
       workInProgress,
@@ -1213,6 +1261,15 @@ function mountIndeterminateComponent(
     typeof value.render === 'function' &&
     value.$$typeof === undefined
   ) {
+    // 这个判断是什么意思呢 函数式组件如果返回的是对象，并且带有render函数
+    // 那么当前函数会当成class组件渲染
+    // function Comp() {
+    //   return {
+    //     render() {
+    //       return <div>111</div>
+    //     }
+    //   }
+    // }
     // Proceed under the assumption that this is a class instance
     workInProgress.tag = ClassComponent;
 
@@ -1275,6 +1332,7 @@ function mountIndeterminateComponent(
         }
       }
     }
+    // 是函数式组件的话，直接调和子节点，生产子节点的Fiber
     reconcileChildren(null, workInProgress, value, renderExpirationTime);
     if (__DEV__) {
       validateFunctionComponentInDev(workInProgress, Component);
@@ -1878,11 +1936,14 @@ function bailoutOnAlreadyFinishedWork(
   // Check if the children have any pending work.
   const childExpirationTime = workInProgress.childExpirationTime;
   if (childExpirationTime < renderExpirationTime) {
+    // 代表子树没有更新需要在这一次渲染中去完成的
+    // 直接return null 跳过整个子树的更新判断
     // The children don't have any work either. We can skip them.
     // TODO: Once we add back resuming, we should check if the children are
     // a work-in-progress set. If so, we need to transfer their effects.
     return null;
   } else {
+    // 如果走到这 说明子树在当前有更新是要执行的
     // This fiber doesn't have work, but its subtree does. Clone the child
     // fibers and continue.
     cloneChildFibers(current, workInProgress);
@@ -1895,8 +1956,12 @@ function beginWork(
   workInProgress: Fiber,
   renderExpirationTime: ExpirationTime,
 ): Fiber | null {
+  // 对于RootFiber节点,只有调用ReactDOM.render 才会在RootFiber节点上产生更新
+  // 所以对于RootFiber ,updateExpirationTime才会有值
+  // 对于普通的Fiber。updateExpirationTime有值说明是当前Fiber上产生的更新
   const updateExpirationTime = workInProgress.expirationTime;
-
+  // 第一次渲染 RooFiber的current是有值的，其他的节点第一次是没有值得
+  // 对于其他节点 第一次渲染都是没有的 都是null
   if (current !== null) {
     const oldProps = current.memoizedProps;
     const newProps = workInProgress.pendingProps;
@@ -1906,6 +1971,10 @@ function beginWork(
       // This may be unset if the props are determined to be equal later (memo).
       didReceiveUpdate = true;
     } else if (updateExpirationTime < renderExpirationTime) {
+      // oldProps === newProps 相等
+      // 如果当前Fiber上的更新的时间小于FiberRoot的更新时间
+      // 说明当前Fiber在这一次不需要渲染
+      // 是可以跳过的
       didReceiveUpdate = false;
       // This fiber does not have any pending work. Bailout without entering
       // the begin phase. There's still some bookkeeping we that needs to be done
@@ -1992,6 +2061,7 @@ function beginWork(
           }
         }
       }
+      // 会跳过当前节点和所有子节点的更新
       return bailoutOnAlreadyFinishedWork(
         current,
         workInProgress,

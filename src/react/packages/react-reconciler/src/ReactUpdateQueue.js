@@ -421,7 +421,7 @@ export function processUpdateQueue<State>(
   renderExpirationTime: ExpirationTime,
 ): void {
   hasForceUpdate = false;
-
+  // 在一开始创建queue的时候，存在workInProgress和fiber都指向同一个queue
   queue = ensureWorkInProgressQueueIsAClone(workInProgress, queue);
 
   if (__DEV__) {
@@ -435,27 +435,33 @@ export function processUpdateQueue<State>(
 
   // Iterate through the list of updates to compute the result.
   let update = queue.firstUpdate;
+  // 执行完updateQueue的结果
   let resultState = newBaseState;
   while (update !== null) {
     const updateExpirationTime = update.expirationTime;
     if (updateExpirationTime < renderExpirationTime) {
+      // 说的当前update更新优先级较低 不需要在本次渲染执行
       // This update does not have sufficient priority. Skip it.
       if (newFirstUpdate === null) {
         // This is the first skipped update. It will be the first update in
         // the new list.
+        // 第一个被忽略的update,等执行完 会成为updateQueue的新的头节点
         newFirstUpdate = update;
         // Since this is the first update that was skipped, the current result
         // is the new base state.
+        // 记录第一个被忽略的更新这个时候的结果
         newBaseState = resultState;
       }
       // Since this update will remain in the list, update the remaining
       // expiration time.
+      // 将新的更新的优先级进行更新
       if (newExpirationTime < updateExpirationTime) {
         newExpirationTime = updateExpirationTime;
       }
     } else {
       // This update does have sufficient priority. Process it and compute
       // a new result.
+      // 说明当前更新是需要在当前更新内完成的  执行update， 计算结果
       resultState = getStateFromUpdate(
         workInProgress,
         queue,
@@ -466,9 +472,12 @@ export function processUpdateQueue<State>(
       );
       const callback = update.callback;
       if (callback !== null) {
+        // 有callback需要执行的话 加上Callback的effectTag
         workInProgress.effectTag |= Callback;
         // Set this to null, in case it was mutated during an aborted render.
+        // 将其设置为null，以防在中止渲染期间发生改变。
         update.nextEffect = null;
+        // 然后将当前update增加到updateQueue的effect链表上
         if (queue.lastEffect === null) {
           queue.firstEffect = queue.lastEffect = update;
         } else {
@@ -530,6 +539,8 @@ export function processUpdateQueue<State>(
     update = update.next;
   }
 
+  // 如果newFirstUpdate为null， 说明当前更新把update都执行完了
+  // 执行完的时候 ，firstUpdate是null了 需要将lastUpdate也设置成null
   if (newFirstUpdate === null) {
     queue.lastUpdate = null;
   }
@@ -541,6 +552,9 @@ export function processUpdateQueue<State>(
   if (newFirstUpdate === null && newFirstCapturedUpdate === null) {
     // We processed every update, without skipping. That means the new base
     // state is the same as the result state.
+    // 走到这说明更新都执行完了 那么newBaseState就是resultState
+    // 没走到这 说明newBaseState是第一次被忽略的update的更新,下一次渲染的时候
+    // baseState 从上一次渲染的第一次忽略的baseState开始
     newBaseState = resultState;
   }
 

@@ -203,13 +203,16 @@ export function createInstance(
   } else {
     parentNamespace = ((hostContext: any): HostContextProd);
   }
+  // 创建DOM节点 
   const domElement: Instance = createElement(
     type,
     props,
     rootContainerInstance,
     parentNamespace,
   );
+  // 将当前Fiber节点挂在到DOM节点上
   precacheFiberNode(internalInstanceHandle, domElement);
+  // 将当前的props挂在到DOM节点上
   updateFiberProps(domElement, props);
   return domElement;
 }

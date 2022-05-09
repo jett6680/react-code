@@ -102,7 +102,7 @@ let updateHostComponent;
 let updateHostText;
 if (supportsMutation) {
   // Mutation mode
-
+  // ReactDOM  supportsMutation 为true 
   appendAllChildren = function(
     parent: Instance,
     workInProgress: Fiber,
@@ -114,28 +114,39 @@ if (supportsMutation) {
     let node = workInProgress.child;
     while (node !== null) {
       if (node.tag === HostComponent || node.tag === HostText) {
+        // 将子节点的dom节点appendChild到父节点里面 并不会对嵌套的child进行append操作
+        // 只会append直接子节点
         appendInitialChild(parent, node.stateNode);
       } else if (node.tag === HostPortal) {
         // If we have a portal child, then we don't want to traverse
         // down its children. Instead, we'll get insertions from each child in
         // the portal directly.
       } else if (node.child !== null) {
+        // 如果当前node不是HostComponent也不是HostText 并且存在child
+        // 那么就去查找当前子节点 因为Fiber节点是存在比如class组件的
+        // 但是DOM树需要挂载的是真实的DOM, 所以要去子节点里面找真实的DOM
         node.child.return = node;
         node = node.child;
         continue;
       }
       if (node === workInProgress) {
+        // 最后找回了自己，就可以跳出循环了
         return;
       }
       while (node.sibling === null) {
+        // 如果当前节点的兄弟节点是不存在的，那么可以向上查找了
         if (node.return === null || node.return === workInProgress) {
           return;
         }
         node = node.return;
       }
       node.sibling.return = node.return;
+      // 在进去的兄弟节点
       node = node.sibling;
     }
+    // 总结：这个方法的意思是什么呢？
+    // 其实就是构建真实DOM的过程，将当前parent节点的直接真实的子DOM节点找到，
+    // appendChild 构建DOM树
   };
 
   updateHostContainer = function(workInProgress: Fiber) {
@@ -582,9 +593,11 @@ function completeWork(
     }
     case HostComponent: {
       popHostContext(workInProgress);
+      // rootContainerInstance 拿到的就是ReactDOM.render的第二个参数dom节点
       const rootContainerInstance = getRootHostContainer();
       const type = workInProgress.type;
       if (current !== null && workInProgress.stateNode != null) {
+        // 符合此条件，说明为更新
         updateHostComponent(
           current,
           workInProgress,
@@ -597,6 +610,7 @@ function completeWork(
           markRef(workInProgress);
         }
       } else {
+        // 走到else，就是第一次渲染，此时需要创建当前DOM节点
         if (!newProps) {
           invariant(
             workInProgress.stateNode !== null,

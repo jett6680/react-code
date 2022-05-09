@@ -663,10 +663,12 @@ export function diffProperties(
   let styleUpdates = null;
   for (propKey in lastProps) {
     if (
-      nextProps.hasOwnProperty(propKey) ||
-      !lastProps.hasOwnProperty(propKey) ||
-      lastProps[propKey] == null
+      nextProps.hasOwnProperty(propKey) ||  // 新的property有
+      !lastProps.hasOwnProperty(propKey) || // 老的property没有
+      lastProps[propKey] == null // 老的property是null
     ) {
+      // 只要符合一个 就跳过，如果没跳过 说明是新的没有 老的有
+      // 也就是说明当前propKey是需要被删除的
       continue;
     }
     if (propKey === STYLE) {
@@ -676,6 +678,7 @@ export function diffProperties(
           if (!styleUpdates) {
             styleUpdates = {};
           }
+          // 删除style，将其设置成空
           styleUpdates[styleName] = '';
         }
       }
@@ -698,6 +701,7 @@ export function diffProperties(
     } else {
       // For all other deleted properties we add it to the queue. We use
       // the whitelist in the commit phase instead.
+      // 对于要删除的属性，都push到updatePayload里面
       (updatePayload = updatePayload || []).push(propKey, null);
     }
   }

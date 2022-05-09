@@ -502,7 +502,8 @@ function adoptClassInstance(workInProgress: Fiber, instance: any): void {
     instance._reactInternalInstance = fakeInternalInstance;
   }
 }
-
+// 1. 实例化类组件
+// 2. 设置当前类组件的更新器，主要是setState方法的实现
 function constructClassInstance(
   workInProgress: Fiber,
   ctor: any,
@@ -579,8 +580,9 @@ function constructClassInstance(
       new ctor(props, context); // eslint-disable-line no-new
     }
   }
-
+  // 直接实例化类组件
   const instance = new ctor(props, context);
+  // 将类组件上的state设置到Fiber上
   const state = (workInProgress.memoizedState =
     instance.state !== null && instance.state !== undefined
       ? instance.state
@@ -755,6 +757,7 @@ function mountClassInstance(
   }
 
   const instance = workInProgress.stateNode;
+  // 设置类组件的props和state，初始化refs
   instance.props = newProps;
   instance.state = workInProgress.memoizedState;
   instance.refs = emptyRefsObject;
@@ -804,6 +807,7 @@ function mountClassInstance(
 
   let updateQueue = workInProgress.updateQueue;
   if (updateQueue !== null) {
+    // 执行updateQueue
     processUpdateQueue(
       workInProgress,
       updateQueue,
@@ -811,17 +815,20 @@ function mountClassInstance(
       instance,
       renderExpirationTime,
     );
+    // 将执行完updateQueue的结果，更新到类组件的state上
     instance.state = workInProgress.memoizedState;
   }
 
   const getDerivedStateFromProps = ctor.getDerivedStateFromProps;
   if (typeof getDerivedStateFromProps === 'function') {
+    // 执行 getDerivedStateFromProps 静态方法
     applyDerivedStateFromProps(
       workInProgress,
       ctor,
       getDerivedStateFromProps,
       newProps,
     );
+    // 将执行完更新的state更新到类组件上
     instance.state = workInProgress.memoizedState;
   }
 
@@ -1072,8 +1079,16 @@ function updateClassInstance(
     !hasContextChanged() &&
     !checkHasForceUpdateAfterProcessing()
   ) {
+    // 新老props和state都相等
+    // context没有改变 并且没有强制更新 
+    // 上面执行了 resetHasForceUpdateBeforeProcessing 这里为什么会判断
+    // checkHasForceUpdateAfterProcessing 呢， 因为在processUpdateQueue的
+    // 时候，存在forceUpdate的时候，hasForceUpdate会变成true
+
     // If an update was already in progress, we should schedule an Update
     // effect even though we're bailing out, so that cWU/cDU are called.
+    // 如果当前已经执行了更新update,尽管我们要优化组件的更新，componentDidUpdate和
+    // getSnapshotBeforeUpdate 还是要调用的
     if (typeof instance.componentDidUpdate === 'function') {
       if (
         oldProps !== current.memoizedProps ||

@@ -905,6 +905,7 @@ function resetChildExpirationTime(
   let newChildExpirationTime = NoWork;
 
   // Bubble up the earliest expiration time.
+  // 向上冒泡子节点的最高优先级的expirationTime
   if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
     // We're in profiling mode.
     // Let's use this same traversal to update the render durations.
@@ -971,11 +972,13 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
     if (__DEV__) {
       setCurrentFiber(workInProgress);
     }
-
+    // 父节点
     const returnFiber = workInProgress.return;
+    // 兄弟节点
     const siblingFiber = workInProgress.sibling;
 
     if ((workInProgress.effectTag & Incomplete) === NoEffect) {
+      // 进入到这 说明当前Fiber上没有 Incomplete tag, 也就是没有出现错误被捕获的情况
       if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
         // Don't replay if it fails during completion phase.
         mayReplayFailedUnitOfWork = false;
@@ -1008,6 +1011,9 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         mayReplayFailedUnitOfWork = true;
       }
       stopWorkTimer(workInProgress);
+      // 当前节点complete完 说明有高优先级的子节点已经更新完了
+      // 那么就需要更新 childExpirationTime
+      // 向上冒泡子节点的最高优先级的expirationTime
       resetChildExpirationTime(workInProgress, nextRenderExpirationTime);
       if (__DEV__) {
         resetCurrentFiber();
@@ -1023,6 +1029,9 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         // Do not append effects to parents if a sibling failed to complete
         (returnFiber.effectTag & Incomplete) === NoEffect
       ) {
+        // 父节点存在，父节点没有 Incomplete tag, 也就是没有出现错误被捕获的情况
+        // 然后将当前节点的firstEffect到lastEffect链到父节点上，一直往上赶effect
+        // 直到最后，effect都到了RootFiber节点上
         // Append all the effects of the subtree and this fiber onto the effect
         // list of the parent. The completion order of the children affects the
         // side-effect order.
@@ -1045,6 +1054,9 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         const effectTag = workInProgress.effectTag;
         // Skip both NoWork and PerformedWork tags when creating the effect list.
         // PerformedWork effect is read by React DevTools but shouldn't be committed.
+        // PerformedWork 的值是1,如果当前Fiber有更新，那么当前Fiber的tag肯定大于1
+        // 也就是说 当前Fiber有更新或者说是删除等等effect存在，那么当前Fiber也要添加到
+        // 父节点的Effect链上
         if (effectTag > PerformedWork) {
           if (returnFiber.lastEffect !== null) {
             returnFiber.lastEffect.nextEffect = workInProgress;
@@ -1060,17 +1072,21 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
       }
 
       if (siblingFiber !== null) {
-        // If there is more work to do in this returnFiber, do that next.
+        // 如果兄弟节点存在,那么返回兄弟节点,然后跳出循环
+        // 兄弟节点继续进行beginWork
         return siblingFiber;
       } else if (returnFiber !== null) {
         // If there's no more work in this returnFiber. Complete the returnFiber.
+        // 如果兄弟节点不存在,并且父节点存在，那么就继续将父节点执行completeUnitOfWork
         workInProgress = returnFiber;
         continue;
       } else {
         // We've reached the root.
+        // 如果兄弟节点和父节点都不存在,说明到RootFiber了，可以直接跳出循环了
         return null;
       }
     } else {
+      // 出现了错误被捕获的情况
       if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
         // Record the render duration for the fiber that errored.
         stopProfilerTimerIfRunningAndRecordDelta(workInProgress, false);
@@ -1149,6 +1165,10 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
   // Ideally nothing should rely on this, but relying on it here
   // means that we don't need an additional field on the work in
   // progress.
+  // 对于FiberRoot 在renderRoot的时候 立马创建了 workInProgress ,
+  // workInProgress.alternate 就是Fiber对象
+  // 处理FiberRoot一开始current是有值的 其他的节点一开始current都是没有值的
+  // 除非第一次渲染完后，在第二次渲染的时候就会都有值
   const current = workInProgress.alternate;
 
   // See if beginning this work spawns more work.
@@ -1178,7 +1198,9 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
       stopProfilerTimerIfRunningAndRecordDelta(workInProgress, true);
     }
   } else {
+    // 开始执行beginWork
     next = beginWork(current, workInProgress, nextRenderExpirationTime);
+    // 更新完后将pendingProps赋值给memoizedProps
     workInProgress.memoizedProps = workInProgress.pendingProps;
   }
 
@@ -1197,7 +1219,9 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
   }
 
   if (next === null) {
-    // If this doesn't spawn new work, complete the current work.
+    // 如果next是null 执行completeUnitOfWork ，完成这个单元的更新
+    // completeUnitOfWork会向上返回父节点或者兄弟节点
+    // 当next真的为null跳出workLoop的循环后,说明当前到了FiberRoot
     next = completeUnitOfWork(workInProgress);
   }
 
@@ -2368,6 +2392,7 @@ function performWorkOnRoot(
 
   // Check if this is async work or sync/expired work.
   if (!isYieldy) {
+    // 同步任务和异步的超时任务会走到这
     // Flush work without yielding.
     // TODO: Non-yieldy work does not necessarily imply expired work. A renderer
     // may want to perform some work without yielding, but also without
@@ -2375,12 +2400,15 @@ function performWorkOnRoot(
 
     let finishedWork = root.finishedWork;
     if (finishedWork !== null) {
+      // 如果存在 说明render过程完成 可以commit了
       // This root is already complete. We can commit it.
       completeRoot(root, finishedWork, expirationTime);
     } else {
       root.finishedWork = null;
       // If this root previously suspended, clear its existing timeout, since
       // we're about to try rendering again.
+      // 在任务被挂起的时候通过setTimeout设置的返回内容，
+      //用来下一次如果有新的任务挂起时清理还没触发的timeout
       const timeoutHandle = root.timeoutHandle;
       if (timeoutHandle !== noTimeout) {
         root.timeoutHandle = noTimeout;
@@ -2396,6 +2424,7 @@ function performWorkOnRoot(
     }
   } else {
     // Flush async work.
+    // 执行异步任务
     let finishedWork = root.finishedWork;
     if (finishedWork !== null) {
       // This root is already complete. We can commit it.
@@ -2415,6 +2444,8 @@ function performWorkOnRoot(
       if (finishedWork !== null) {
         // We've completed the root. Check the if we should yield one more time
         // before committing.
+        // 首先检查当前一贞的时间片还有没有时间
+        // 如果时间不够，就留到下一帧处理，如果时间还有，就执行commit
         if (!shouldYieldToRenderer()) {
           // Still time left. Commit the root.
           completeRoot(root, finishedWork, expirationTime);
