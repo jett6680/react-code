@@ -348,8 +348,11 @@ export function commitUpdate(
 ): void {
   // Update the props handle so that we know which props are the ones with
   // with current event handlers.
+  // 每个DOM节点上都挂在了虚拟DOM所接收到props
+  // 这里有更新了也要将当前DOM节点属性上挂载的那个更新一下
   updateFiberProps(domElement, newProps);
   // Apply the diff to the DOM node.
+  // 更新属性到DOM节点上
   updateProperties(domElement, updatePayload, type, oldProps, newProps);
 }
 

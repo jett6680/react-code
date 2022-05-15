@@ -357,6 +357,7 @@ function updateDOMProperties(
 ): void {
   // TODO: Handle wasCustomComponentTag
   for (let i = 0; i < updatePayload.length; i += 2) {
+    // 从 updatePayload 上获取key和value
     const propKey = updatePayload[i];
     const propValue = updatePayload[i + 1];
     if (propKey === STYLE) {

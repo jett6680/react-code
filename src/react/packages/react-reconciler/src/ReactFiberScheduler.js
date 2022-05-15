@@ -402,7 +402,7 @@ function commitAllHostEffects() {
     recordEffect();
 
     const effectTag = nextEffect.effectTag;
-
+    // 如果存在文本清空的tag， 就执行设置成空
     if (effectTag & ContentReset) {
       commitResetTextContent(nextEffect);
     }
@@ -467,6 +467,9 @@ function commitBeforeMutationLifecycles() {
     }
 
     const effectTag = nextEffect.effectTag;
+    // 如果有Snapshot的tag，就执行commitBeforeMutationLifeCycles
+    // 对于class组件，执行getSnapshotBeforeUpdate
+    // 对于function组件，执行相关Effect
     if (effectTag & Snapshot) {
       recordEffect();
       const current = nextEffect.alternate;
@@ -480,7 +483,7 @@ function commitBeforeMutationLifecycles() {
     resetCurrentFiber();
   }
 }
-
+// 执行相应的生命周期
 function commitAllLifeCycles(
   finishedRoot: FiberRoot,
   committedExpirationTime: ExpirationTime,
@@ -498,7 +501,7 @@ function commitAllLifeCycles(
       setCurrentFiber(nextEffect);
     }
     const effectTag = nextEffect.effectTag;
-
+    // 具有回调以及更新的tag会调用commitLifeCycles
     if (effectTag & (Update | Callback)) {
       recordEffect();
       const current = nextEffect.alternate;
@@ -670,6 +673,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // Invoke instances of getSnapshotBeforeUpdate before mutation.
   nextEffect = firstEffect;
   startCommitSnapshotEffectsTimer();
+  // 对一个循环
   while (nextEffect !== null) {
     let didError = false;
     let error;
@@ -713,6 +717,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // ref unmounts.
   nextEffect = firstEffect;
   startCommitHostEffectsTimer();
+  // 第二个循环
   while (nextEffect !== null) {
     let didError = false;
     let error;
@@ -759,6 +764,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // This pass also triggers any renderer-specific initial effects.
   nextEffect = firstEffect;
   startCommitLifeCyclesTimer();
+  // 第三个循环
   while (nextEffect !== null) {
     let didError = false;
     let error;
