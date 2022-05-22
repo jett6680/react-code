@@ -74,6 +74,7 @@ function executeDispatch(event, listener, inst) {
  * Standard/simple iteration through an event's collected dispatches.
  */
 export function executeDispatchesInOrder(event) {
+  // 获取事件对象生成阶段设置的值
   const dispatchListeners = event._dispatchListeners;
   const dispatchInstances = event._dispatchInstances;
   if (__DEV__) {
@@ -88,6 +89,7 @@ export function executeDispatchesInOrder(event) {
       executeDispatch(event, dispatchListeners[i], dispatchInstances[i]);
     }
   } else if (dispatchListeners) {
+    // 开始调用
     executeDispatch(event, dispatchListeners, dispatchInstances);
   }
   event._dispatchListeners = null;

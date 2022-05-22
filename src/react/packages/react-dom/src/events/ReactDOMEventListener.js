@@ -57,6 +57,9 @@ function getTopLevelCallbackBookKeeping(
   targetInst: Fiber | null,
   ancestors: Array<Fiber>,
 } {
+  // 就是一个bookKeeping的数据结构
+  // 这里有一个对象池的概念 减少频繁的对象创建
+  // 带来的内存开销， 以提高性能
   if (callbackBookkeepingPool.length) {
     const instance = callbackBookkeepingPool.pop();
     instance.topLevelType = topLevelType;
@@ -68,6 +71,7 @@ function getTopLevelCallbackBookKeeping(
     topLevelType,
     nativeEvent,
     targetInst,
+    // 存储的组件bookKeeping节点
     ancestors: [],
   };
 }
@@ -84,7 +88,6 @@ function releaseTopLevelCallbackBookKeeping(instance) {
 
 function handleTopLevel(bookKeeping) {
   let targetInst = bookKeeping.targetInst;
-
   // Loop through the hierarchy, in case there's any nested components.
   // It's important that we build the array of ancestors before calling any
   // event handlers, because event handlers can modify the DOM, leading to
@@ -92,18 +95,22 @@ function handleTopLevel(bookKeeping) {
   let ancestor = targetInst;
   do {
     if (!ancestor) {
+      // 栈操作
       bookKeeping.ancestors.push(ancestor);
       break;
     }
+    // 找到HostRoot 也就是root dom节点
     const root = findRootContainerNode(ancestor);
     if (!root) {
       break;
     }
     bookKeeping.ancestors.push(ancestor);
+    // 查找当前DOM节点最近的组件的Fiber 当然只针对HostComponent
     ancestor = getClosestInstanceFromNode(root);
   } while (ancestor);
 
   for (let i = 0; i < bookKeeping.ancestors.length; i++) {
+    // 遍历组件，从最顶部开始，依次对当前DOM节点执行 runExtractedEventsInBatch
     targetInst = bookKeeping.ancestors[i];
     runExtractedEventsInBatch(
       bookKeeping.topLevelType,
@@ -192,8 +199,9 @@ export function dispatchEvent(
   if (!_enabled) {
     return;
   }
-
+  // 获取原生时间对象的target
   const nativeEventTarget = getEventTarget(nativeEvent);
+  // 获取当前target节点上挂在的Fiber对象
   let targetInst = getClosestInstanceFromNode(nativeEventTarget);
   if (
     targetInst !== null &&
@@ -207,6 +215,7 @@ export function dispatchEvent(
     targetInst = null;
   }
 
+  // 生成一个bookKeeping对象
   const bookKeeping = getTopLevelCallbackBookKeeping(
     topLevelType,
     nativeEvent,
@@ -216,6 +225,7 @@ export function dispatchEvent(
   try {
     // Event queue being processed in the same cycle allows
     // `preventDefault`.
+    // 执行
     batchedUpdates(handleTopLevel, bookKeeping);
   } finally {
     releaseTopLevelCallbackBookKeeping(bookKeeping);

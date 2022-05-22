@@ -257,9 +257,12 @@ function ensureListeningTo(rootContainerElement, registrationName) {
   const isDocumentOrFragment =
     rootContainerElement.nodeType === DOCUMENT_NODE ||
     rootContainerElement.nodeType === DOCUMENT_FRAGMENT_NODE;
+  // 获取当前的document
   const doc = isDocumentOrFragment
     ? rootContainerElement
     : rootContainerElement.ownerDocument;
+  // 传入React事件名称以及 document
+  // 这里的 registrationName 就是onChange等
   listenTo(registrationName, doc);
 }
 
@@ -337,10 +340,14 @@ function setInitialDOMProperties(
       // adding a special case here, but then it wouldn't be emitted
       // on server rendering (but we *do* want to emit it in SSR).
     } else if (registrationNameModules.hasOwnProperty(propKey)) {
+      // registrationNameModules 就是在注入平台事件后，生产的对象
+      // propKey 就是 registrationName 比如 onChange 、onClick 等
       if (nextProp != null) {
         if (__DEV__ && typeof nextProp !== 'function') {
           warnForInvalidEventListener(propKey, nextProp);
         }
+        // rootContainerElement 就是ReactDOM.render的第二个参数 也就是我们
+        // 传入的id为root的DOM节点
         ensureListeningTo(rootContainerElement, propKey);
       }
     } else if (nextProp != null) {

@@ -96,9 +96,11 @@ function getListeningForDocument(mountAt: any) {
   // In IE8, `mountAt` is a host object and doesn't have `hasOwnProperty`
   // directly.
   if (!Object.prototype.hasOwnProperty.call(mountAt, topListenersIDKey)) {
+    // 先赋值，在++
     mountAt[topListenersIDKey] = reactTopListenersCounter++;
     alreadyListeningTo[mountAt[topListenersIDKey]] = {};
   }
+  // mountAt 上存的值 看起来一直都是0
   return alreadyListeningTo[mountAt[topListenersIDKey]];
 }
 
@@ -127,12 +129,16 @@ export function listenTo(
   registrationName: string,
   mountAt: Document | Element,
 ) {
+  // 拿到的是一个对象
   const isListening = getListeningForDocument(mountAt);
+  // 获取当前事件的dependencies
   const dependencies = registrationNameDependencies[registrationName];
-
   for (let i = 0; i < dependencies.length; i++) {
+    // dependency 就是click blur change 等等
     const dependency = dependencies[i];
     if (!(isListening.hasOwnProperty(dependency) && isListening[dependency])) {
+      // 只有当isListening 没有，才会进入到这里
+      // 也就是说 监听过 就不会重复监听了
       switch (dependency) {
         case TOP_SCROLL:
           trapCapturedEvent(TOP_SCROLL, mountAt);
@@ -161,8 +167,11 @@ export function listenTo(
         default:
           // By default, listen on the top level to all non-media events.
           // Media events don't bubble so adding the listener wouldn't do anything.
+          // 媒体相关的事件监听过了
+          // 所以在这里除了不是媒体相关的事件，都需要监听
           const isMediaEvent = mediaEventTypes.indexOf(dependency) !== -1;
           if (!isMediaEvent) {
+            // 冒泡阶段的监听
             trapBubbledEvent(dependency, mountAt);
           }
           break;

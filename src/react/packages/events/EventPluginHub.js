@@ -41,6 +41,7 @@ let eventQueue: ?(Array<ReactSyntheticEvent> | ReactSyntheticEvent) = null;
  */
 const executeDispatchesAndRelease = function(event: ReactSyntheticEvent) {
   if (event) {
+    // 执行
     executeDispatchesInOrder(event);
 
     if (!event.isPersistent()) {
@@ -133,11 +134,14 @@ export function getListener(inst: Fiber, registrationName: string) {
     // Work in progress (ex: onload events in incremental mode).
     return null;
   }
+  // 从DOM节点获取props
+  // 因为props被设置到了dom节点的熟悉上面了
   const props = getFiberCurrentPropsFromNode(stateNode);
   if (!props) {
     // Work in progress.
     return null;
   }
+  // 直接获取listener 也就是事件绑定的那个函数
   listener = props[registrationName];
   if (shouldPreventMouseEvent(registrationName, inst.type, props)) {
     return null;
@@ -158,6 +162,7 @@ export function getListener(inst: Fiber, registrationName: string) {
  * @return {*} An accumulation of synthetic events.
  * @internal
  */
+// 提取event对象
 function extractEvents(
   topLevelType: TopLevelType,
   targetInst: null | Fiber,
@@ -169,6 +174,7 @@ function extractEvents(
     // Not every plugin in the ordering may be loaded at runtime.
     const possiblePlugin: PluginModule<AnyNativeEvent> = plugins[i];
     if (possiblePlugin) {
+      // 执行插件上生成event对象的方法
       const extractedEvents = possiblePlugin.extractEvents(
         topLevelType,
         targetInst,
@@ -176,10 +182,13 @@ function extractEvents(
         nativeEventTarget,
       );
       if (extractedEvents) {
+        // 将注入的插件plugins遍历，然后执行extractEvents
+        // 最后将生成的事件对象都汇总到一起，形成一个数组
         events = accumulateInto(events, extractedEvents);
       }
     }
   }
+  // 返回生成的事件对象
   return events;
 }
 
@@ -187,6 +196,7 @@ export function runEventsInBatch(
   events: Array<ReactSyntheticEvent> | ReactSyntheticEvent | null,
 ) {
   if (events !== null) {
+    // 将事件形成一个队列
     eventQueue = accumulateInto(eventQueue, events);
   }
 
@@ -198,7 +208,7 @@ export function runEventsInBatch(
   if (!processingEventQueue) {
     return;
   }
-
+  // 遍历，逐个调用 executeDispatchesAndReleaseTopLevel
   forEachAccumulated(processingEventQueue, executeDispatchesAndReleaseTopLevel);
   invariant(
     !eventQueue,
@@ -215,11 +225,13 @@ export function runExtractedEventsInBatch(
   nativeEvent: AnyNativeEvent,
   nativeEventTarget: EventTarget,
 ) {
+  // 提取时间对象
   const events = extractEvents(
     topLevelType,
     targetInst,
     nativeEvent,
     nativeEventTarget,
   );
+  // 在批量中执行events
   runEventsInBatch(events);
 }

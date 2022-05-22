@@ -48,8 +48,10 @@ function accumulateDirectionalDispatches(inst, phase, event) {
   if (__DEV__) {
     warningWithoutStack(inst, 'Dispatching inst must not be null');
   }
+  // 获取事件绑定的函数
   const listener = listenerAtPhase(inst, event, phase);
   if (listener) {
+    // 将当前listener存到Fiber节点的 _dispatchListeners 对象上
     event._dispatchListeners = accumulateInto(
       event._dispatchListeners,
       listener,

@@ -37,10 +37,14 @@ const namesToPlugins: NamesToPlugins = {};
 function recomputePluginOrdering(): void {
   if (!eventPluginOrder) {
     // Wait until an `eventPluginOrder` is injected.
+    // 可能存在eventPluginOrder没有值得情况
+    // 不存在就先返回，第一次进来是肯定有值得
     return;
   }
   for (const pluginName in namesToPlugins) {
+    // 拿到事件插件的值
     const pluginModule = namesToPlugins[pluginName];
+    // 计算索引，
     const pluginIndex = eventPluginOrder.indexOf(pluginName);
     invariant(
       pluginIndex > -1,
@@ -57,14 +61,21 @@ function recomputePluginOrdering(): void {
         'method, but `%s` does not.',
       pluginName,
     );
+    // 将pluginModule按顺序放置在plugins数组里面
+    // plugins 的索引为0是空的,因为没有ResponderEventPlugin
     plugins[pluginIndex] = pluginModule;
     const publishedEvents = pluginModule.eventTypes;
     for (const eventName in publishedEvents) {
+      // 这里的 eventName 就是 eventTypes的键 
+      // 比如 change事件，就是 ‘change’
       invariant(
         publishEventForPlugin(
-          publishedEvents[eventName],
-          pluginModule,
-          eventName,
+          // { phasedRegistrationNames: {...}, dependencies: [...] }
+          publishedEvents[eventName], 
+          // { eventTypes: ..., extractEvents: () => { ... } }
+          pluginModule, 
+          // change
+          eventName, 
         ),
         'EventPluginRegistry: Failed to publish event `%s` for plugin `%s`.',
         eventName,
@@ -94,15 +105,22 @@ function publishEventForPlugin(
     eventName,
   );
   eventNameDispatchConfigs[eventName] = dispatchConfig;
-
+  
+  // phasedRegistrationNames 就是事件阶段的名称 bubbled 、captured 等
   const phasedRegistrationNames = dispatchConfig.phasedRegistrationNames;
   if (phasedRegistrationNames) {
     for (const phaseName in phasedRegistrationNames) {
+        // phaseName 就是 bubbled 、captured 
       if (phasedRegistrationNames.hasOwnProperty(phaseName)) {
+        // phasedRegistrationNames 就是 React Dom节点接收的事件的props的名称
+        // 例如 onChange onClick
         const phasedRegistrationName = phasedRegistrationNames[phaseName];
         publishRegistrationName(
+          // onChange
           phasedRegistrationName,
+          // { eventTypes: ..., extractEvents: () => { ... } }
           pluginModule,
+          // change
           eventName,
         );
       }
@@ -204,7 +222,9 @@ export function injectEventPluginOrder(
       'once. You are likely trying to load more than one copy of React.',
   );
   // Clone the ordering so it cannot be dynamically mutated.
+  // 克隆一份 这样的话可以在当前文件动态修改
   eventPluginOrder = Array.prototype.slice.call(injectedEventPluginOrder);
+  // 计算一下插件的顺序
   recomputePluginOrdering();
 }
 
@@ -245,3 +265,9 @@ export function injectEventPluginsByName(
     recomputePluginOrdering();
   }
 }
+
+console.log('namesToPlugins', namesToPlugins)
+console.log('registrationNameModules', registrationNameModules)
+console.log('registrationNameDependencies', registrationNameDependencies)
+console.log('plugins', plugins)
+console.log('eventNameDispatchConfigs', eventNameDispatchConfigs)

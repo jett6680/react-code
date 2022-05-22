@@ -90,9 +90,11 @@ export function traverseTwoPhase(inst, fn, arg) {
     inst = getParent(inst);
   }
   let i;
+  // 从父到子执行事件的捕获操作
   for (i = path.length; i-- > 0; ) {
     fn(path[i], 'captured', arg);
   }
+  // 从子到付执行事件的冒泡操作
   for (i = 0; i < path.length; i++) {
     fn(path[i], 'bubbled', arg);
   }

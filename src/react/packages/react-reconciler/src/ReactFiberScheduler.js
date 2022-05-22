@@ -1237,7 +1237,6 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
 }
 
 function workLoop(isYieldy) {
-  debugger
   if (!isYieldy) {
     // Flush work without yielding
     while (nextUnitOfWork !== null) {

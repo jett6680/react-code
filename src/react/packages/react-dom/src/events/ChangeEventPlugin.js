@@ -32,6 +32,8 @@ import {disableInputAttributeSyncing} from 'shared/ReactFeatureFlags';
 
 const eventTypes = {
   change: {
+    // 事件分为2个阶段，捕获阶段和冒泡阶段
+    // 一般情况下 我们使用的都是冒泡阶段的事件
     phasedRegistrationNames: {
       bubbled: 'onChange',
       captured: 'onChangeCapture',
@@ -50,6 +52,8 @@ const eventTypes = {
 };
 
 function createAndAccumulateChangeEvent(inst, nativeEvent, target) {
+  // 从合成事件对象池获取event对象
+  // 这里对象池也是为了避免频繁的对象创建，造成不必要的内存开销
   const event = SyntheticEvent.getPooled(
     eventTypes.change,
     inst,
@@ -58,7 +62,10 @@ function createAndAccumulateChangeEvent(inst, nativeEvent, target) {
   );
   event.type = 'change';
   // Flag this event loop as needing state restore.
+  // 这个方法暂时没发现具体的作用
   enqueueStateRestore(target);
+  // 处理两个阶段  ‘捕获’ ‘冒泡阶段’ 
+  // 以及事件真正要调用的函数(listener)会被挂在到event对象上
   accumulateTwoPhaseDispatches(event);
   return event;
 }
@@ -259,7 +266,7 @@ const ChangeEventPlugin = {
   eventTypes: eventTypes,
 
   _isInputEventSupported: isInputEventSupported,
-
+  // 用来生成事件对象的
   extractEvents: function(
     topLevelType,
     targetInst,
@@ -281,10 +288,11 @@ const ChangeEventPlugin = {
     } else if (shouldUseClickEvent(targetNode)) {
       getTargetInstFunc = getTargetInstForClickEvent;
     }
-
+    // 根据特定的节点类型，生成一个获取当前事件对象目标Fiber实例的方法
     if (getTargetInstFunc) {
       const inst = getTargetInstFunc(topLevelType, targetInst);
       if (inst) {
+        // 支持创建事件对象的真正方法
         const event = createAndAccumulateChangeEvent(
           inst,
           nativeEvent,
