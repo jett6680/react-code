@@ -230,6 +230,9 @@ function commitBeforeMutationLifeCycles(
     case FunctionComponent:
     case ForwardRef:
     case SimpleMemoComponent: {
+      // 传入的tag UnmountSnapshot NoHookEffect
+      // useEffect 和 useLayoutEffect 没有使用这两个tag
+      // 所以在这个阶段， useEffect 和 useLayoutEffect 都不会被调用
       commitHookEffectList(UnmountSnapshot, NoHookEffect, finishedWork);
       return;
     }
@@ -390,6 +393,9 @@ function commitLifeCycles(
     case FunctionComponent:
     case ForwardRef:
     case SimpleMemoComponent: {
+      // 传入UnmountLayout 和 MountLayout
+      // useLayoutEffect具有 MountLayout的tag
+      // 所以在这里 useLayoutEffect会被调用, 此时，DOM节点已经被真正的渲染到页面上
       commitHookEffectList(UnmountLayout, MountLayout, finishedWork);
       break;
     }

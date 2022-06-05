@@ -806,6 +806,8 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
     // after the next paint. Schedule an callback to fire them in an async
     // event. To ensure serial execution, the callback will be flushed early if
     // we enter rootWithPendingPassiveEffects commit phase before then.
+    // 这个时候调用useEffect，先调用unmount, 在调用 mount ,这个时候已经渲染完成了
+    // 不会阻塞渲染
     let callback = commitPassiveEffects.bind(null, root, firstEffect);
     if (enableSchedulerTracing) {
       // TODO: Avoid this extra callback by mutating the tracing ref directly,

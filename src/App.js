@@ -2,8 +2,9 @@ import React from 'react'
 // import LifeCycles from './LifeCycles'
 // import HookComponents from './Hook'
 // import ClassComponents from './Class'
-import ParentComponent from './ParentComponent'
-import ChildComponent from './ChildComponent'
+// import ParentComponent from './ParentComponent'
+// import ChildComponent from './ChildComponent'
+import Hook from './Hook'
 
 export default class App extends React.Component {
 
@@ -14,9 +15,7 @@ export default class App extends React.Component {
   render() {
     return (
       <div className="app-component-wrap">
-        <ParentComponent>
-          <ChildComponent />
-        </ParentComponent>
+        <Hook />
       </div>
     )
   }

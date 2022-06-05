@@ -66,16 +66,16 @@ function recomputePluginOrdering(): void {
     plugins[pluginIndex] = pluginModule;
     const publishedEvents = pluginModule.eventTypes;
     for (const eventName in publishedEvents) {
-      // 这里的 eventName 就是 eventTypes的键 
+      // 这里的 eventName 就是 eventTypes的键
       // 比如 change事件，就是 ‘change’
       invariant(
         publishEventForPlugin(
           // { phasedRegistrationNames: {...}, dependencies: [...] }
-          publishedEvents[eventName], 
+          publishedEvents[eventName],
           // { eventTypes: ..., extractEvents: () => { ... } }
-          pluginModule, 
+          pluginModule,
           // change
-          eventName, 
+          eventName,
         ),
         'EventPluginRegistry: Failed to publish event `%s` for plugin `%s`.',
         eventName,
@@ -105,12 +105,12 @@ function publishEventForPlugin(
     eventName,
   );
   eventNameDispatchConfigs[eventName] = dispatchConfig;
-  
+
   // phasedRegistrationNames 就是事件阶段的名称 bubbled 、captured 等
   const phasedRegistrationNames = dispatchConfig.phasedRegistrationNames;
   if (phasedRegistrationNames) {
     for (const phaseName in phasedRegistrationNames) {
-        // phaseName 就是 bubbled 、captured 
+        // phaseName 就是 bubbled 、captured
       if (phasedRegistrationNames.hasOwnProperty(phaseName)) {
         // phasedRegistrationNames 就是 React Dom节点接收的事件的props的名称
         // 例如 onChange onClick
@@ -266,8 +266,8 @@ export function injectEventPluginsByName(
   }
 }
 
-console.log('namesToPlugins', namesToPlugins)
-console.log('registrationNameModules', registrationNameModules)
-console.log('registrationNameDependencies', registrationNameDependencies)
-console.log('plugins', plugins)
-console.log('eventNameDispatchConfigs', eventNameDispatchConfigs)
+// console.log('namesToPlugins', namesToPlugins)
+// console.log('registrationNameModules', registrationNameModules)
+// console.log('registrationNameDependencies', registrationNameDependencies)
+// console.log('plugins', plugins)
+// console.log('eventNameDispatchConfigs', eventNameDispatchConfigs)
