@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,17 +12,17 @@
 let React;
 let ReactDOM;
 let ReactDOMServer;
+let ReactFeatureFlags;
 let ReactTestUtils;
 
 describe('ReactComponent', () => {
-  function normalizeCodeLocInfo(str) {
-    return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
-  }
-
   beforeEach(() => {
+    jest.resetModules();
+
     React = require('react');
     ReactDOM = require('react-dom');
     ReactDOMServer = require('react-dom/server');
+    ReactFeatureFlags = require('shared/ReactFeatureFlags');
     ReactTestUtils = require('react-dom/test-utils');
   });
 
@@ -38,7 +38,7 @@ describe('ReactComponent', () => {
     }).toThrowError(/Target container is not a DOM element./);
   });
 
-  it('should throw when supplying a ref outside of render method', () => {
+  it('should throw when supplying a string ref outside of render method', () => {
     let instance = <div ref="badDiv" />;
     expect(function() {
       instance = ReactTestUtils.renderIntoDocument(instance);
@@ -104,7 +104,7 @@ describe('ReactComponent', () => {
     }
   });
 
-  it('should support refs on owned components', () => {
+  it('should support string refs on owned components', () => {
     const innerObj = {};
     const outerObj = {};
 
@@ -135,10 +135,29 @@ describe('ReactComponent', () => {
       }
     }
 
-    ReactTestUtils.renderIntoDocument(<Component />);
+    expect(() => {
+      ReactTestUtils.renderIntoDocument(<Component />);
+    }).toErrorDev(
+      ReactFeatureFlags.warnAboutStringRefs
+        ? [
+            'Warning: Component "div" contains the string ref "inner". ' +
+              'Support for string refs will be removed in a future major release. ' +
+              'We recommend using useRef() or createRef() instead. ' +
+              'Learn more about using refs safely here: https://reactjs.org/link/strict-mode-string-ref\n' +
+              '    in div (at **)\n' +
+              '    in Wrapper (at **)\n' +
+              '    in Component (at **)',
+            'Warning: Component "Component" contains the string ref "outer". ' +
+              'Support for string refs will be removed in a future major release. ' +
+              'We recommend using useRef() or createRef() instead. ' +
+              'Learn more about using refs safely here: https://reactjs.org/link/strict-mode-string-ref\n' +
+              '    in Component (at **)',
+          ]
+        : [],
+    );
   });
 
-  it('should not have refs on unmounted components', () => {
+  it('should not have string refs on unmounted components', () => {
     class Parent extends React.Component {
       render() {
         return (
@@ -397,7 +416,7 @@ describe('ReactComponent', () => {
   it('throws usefully when rendering badly-typed elements', () => {
     const X = undefined;
     expect(() => {
-      expect(() => ReactTestUtils.renderIntoDocument(<X />)).toWarnDev(
+      expect(() => ReactTestUtils.renderIntoDocument(<X />)).toErrorDev(
         'React.createElement: type is invalid -- expected a string (for built-in components) ' +
           'or a class/function (for composite components) but got: undefined.',
       );
@@ -412,7 +431,7 @@ describe('ReactComponent', () => {
 
     const Y = null;
     expect(() => {
-      expect(() => ReactTestUtils.renderIntoDocument(<Y />)).toWarnDev(
+      expect(() => ReactTestUtils.renderIntoDocument(<Y />)).toErrorDev(
         'React.createElement: type is invalid -- expected a string (for built-in components) ' +
           'or a class/function (for composite components) but got: null.',
       );
@@ -442,7 +461,7 @@ describe('ReactComponent', () => {
     }
 
     expect(() => {
-      expect(() => ReactTestUtils.renderIntoDocument(<Foo />)).toWarnDev(
+      expect(() => ReactTestUtils.renderIntoDocument(<Foo />)).toErrorDev(
         'React.createElement: type is invalid -- expected a string (for built-in components) ' +
           'or a class/function (for composite components) but got: undefined.',
       );
@@ -465,20 +484,11 @@ describe('ReactComponent', () => {
     };
     const element = <div>{[children]}</div>;
     const container = document.createElement('div');
-    let ex;
-    try {
+    expect(() => {
       ReactDOM.render(element, container);
-    } catch (e) {
-      ex = e;
-    }
-    expect(ex).toBeDefined();
-    expect(normalizeCodeLocInfo(ex.message)).toBe(
-      'Objects are not valid as a React child (found: object with keys {x, y, z}).' +
-        (__DEV__
-          ? ' If you meant to render a collection of children, use ' +
-            'an array instead.' +
-            '\n    in div (at **)'
-          : ''),
+    }).toThrowError(
+      'Objects are not valid as a React child (found: object with keys {x, y, z}). ' +
+        'If you meant to render a collection of children, use an array instead.',
     );
   });
 
@@ -494,21 +504,12 @@ describe('ReactComponent', () => {
       }
     }
     const container = document.createElement('div');
-    let ex;
-    try {
+    expect(() => {
       ReactDOM.render(<Foo />, container);
-    } catch (e) {
-      ex = e;
-    }
-    expect(ex).toBeDefined();
-    expect(normalizeCodeLocInfo(ex.message)).toBe(
+    }).toThrowError(
       'Objects are not valid as a React child (found: object with keys {a, b, c}).' +
-        (__DEV__
-          ? ' If you meant to render a collection of children, use ' +
-            'an array instead.\n' +
-            '    in div (at **)\n' +
-            '    in Foo (at **)'
-          : ''),
+        ' If you meant to render a collection of children, use an array ' +
+        'instead.',
     );
   });
 
@@ -519,20 +520,12 @@ describe('ReactComponent', () => {
       z: <span />,
     };
     const element = <div>{[children]}</div>;
-    let ex;
-    try {
+    expect(() => {
       ReactDOMServer.renderToString(element);
-    } catch (e) {
-      ex = e;
-    }
-    expect(ex).toBeDefined();
-    expect(normalizeCodeLocInfo(ex.message)).toBe(
-      'Objects are not valid as a React child (found: object with keys {x, y, z}).' +
-        (__DEV__
-          ? ' If you meant to render a collection of children, use ' +
-            'an array instead.' +
-            '\n    in div (at **)'
-          : ''),
+    }).toThrowError(
+      'Objects are not valid as a React child (found: object with keys {x, y, z}). ' +
+        'If you meant to render a collection of children, use ' +
+        'an array instead.',
     );
   });
 
@@ -548,21 +541,12 @@ describe('ReactComponent', () => {
       }
     }
     const container = document.createElement('div');
-    let ex;
-    try {
+    expect(() => {
       ReactDOMServer.renderToString(<Foo />, container);
-    } catch (e) {
-      ex = e;
-    }
-    expect(ex).toBeDefined();
-    expect(normalizeCodeLocInfo(ex.message)).toBe(
-      'Objects are not valid as a React child (found: object with keys {a, b, c}).' +
-        (__DEV__
-          ? ' If you meant to render a collection of children, use ' +
-            'an array instead.\n' +
-            '    in div (at **)\n' +
-            '    in Foo (at **)'
-          : ''),
+    }).toThrowError(
+      'Objects are not valid as a React child (found: object with keys {a, b, c}). ' +
+        'If you meant to render a collection of children, use ' +
+        'an array instead.',
     );
   });
 
@@ -572,7 +556,7 @@ describe('ReactComponent', () => {
         return Foo;
       }
       const container = document.createElement('div');
-      expect(() => ReactDOM.render(<Foo />, container)).toWarnDev(
+      expect(() => ReactDOM.render(<Foo />, container)).toErrorDev(
         'Warning: Functions are not valid as a React child. This may happen if ' +
           'you return a Component instead of <Component /> from render. ' +
           'Or maybe you meant to call this function rather than return it.\n' +
@@ -587,7 +571,7 @@ describe('ReactComponent', () => {
         }
       }
       const container = document.createElement('div');
-      expect(() => ReactDOM.render(<Foo />, container)).toWarnDev(
+      expect(() => ReactDOM.render(<Foo />, container)).toErrorDev(
         'Warning: Functions are not valid as a React child. This may happen if ' +
           'you return a Component instead of <Component /> from render. ' +
           'Or maybe you meant to call this function rather than return it.\n' +
@@ -604,7 +588,7 @@ describe('ReactComponent', () => {
         );
       }
       const container = document.createElement('div');
-      expect(() => ReactDOM.render(<Foo />, container)).toWarnDev(
+      expect(() => ReactDOM.render(<Foo />, container)).toErrorDev(
         'Warning: Functions are not valid as a React child. This may happen if ' +
           'you return a Component instead of <Component /> from render. ' +
           'Or maybe you meant to call this function rather than return it.\n' +
@@ -649,7 +633,7 @@ describe('ReactComponent', () => {
       let component;
       expect(() => {
         component = ReactDOM.render(<Foo />, container);
-      }).toWarnDev([
+      }).toErrorDev([
         'Warning: Functions are not valid as a React child. This may happen if ' +
           'you return a Component instead of <Component /> from render. ' +
           'Or maybe you meant to call this function rather than return it.\n' +

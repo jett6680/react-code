@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -39,10 +39,17 @@ class Bad extends React.Component {
 }
 
 describe('ReactErrorLoggingRecovery', () => {
-  let originalConsoleError = console.error;
+  const originalConsoleError = console.error;
 
   beforeEach(() => {
     console.error = error => {
+      if (
+        typeof error === 'string' &&
+        error.includes('ReactDOM.render is no longer supported in React 18')
+      ) {
+        // Ignore legacy root deprecation warning
+        return;
+      }
       throw new Error('Buggy console.error');
     };
   });

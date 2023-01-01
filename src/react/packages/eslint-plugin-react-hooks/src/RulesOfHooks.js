@@ -1,10 +1,11 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
 
+/* global BigInt */
 /* eslint-disable no-for-of-loops/no-for-of-loops */
 
 'use strict';
@@ -15,7 +16,10 @@
  */
 
 function isHookName(s) {
-  return /^use[A-Z0-9].*$/.test(s);
+  if (__EXPERIMENTAL__) {
+    return s === 'use' || /^use[A-Z0-9]/.test(s);
+  }
+  return /^use[A-Z0-9]/.test(s);
 }
 
 /**
@@ -31,10 +35,9 @@ function isHook(node) {
     !node.computed &&
     isHook(node.property)
   ) {
-    // Only consider React.useFoo() to be namespace hooks for now to avoid false positives.
-    // We can expand this check later.
     const obj = node.object;
-    return obj.type === 'Identifier' && obj.name === 'React';
+    const isPascalCaseNameSpace = /^[A-Z].*/;
+    return obj.type === 'Identifier' && isPascalCaseNameSpace.test(obj.name);
   } else {
     return false;
   }
@@ -42,16 +45,46 @@ function isHook(node) {
 
 /**
  * Checks if the node is a React component name. React component names must
- * always start with a non-lowercase letter. So `MyComponent` or `_MyComponent`
- * are valid component names for instance.
+ * always start with an uppercase letter.
  */
 
 function isComponentName(node) {
-  if (node.type === 'Identifier') {
-    return !/^[a-z]/.test(node.name);
-  } else {
-    return false;
-  }
+  return node.type === 'Identifier' && /^[A-Z]/.test(node.name);
+}
+
+function isReactFunction(node, functionName) {
+  return (
+    node.name === functionName ||
+    (node.type === 'MemberExpression' &&
+      node.object.name === 'React' &&
+      node.property.name === functionName)
+  );
+}
+
+/**
+ * Checks if the node is a callback argument of forwardRef. This render function
+ * should follow the rules of hooks.
+ */
+
+function isForwardRefCallback(node) {
+  return !!(
+    node.parent &&
+    node.parent.callee &&
+    isReactFunction(node.parent.callee, 'forwardRef')
+  );
+}
+
+/**
+ * Checks if the node is a callback argument of React.memo. This anonymous
+ * functional component should follow the rules of hooks.
+ */
+
+function isMemoCallback(node) {
+  return !!(
+    node.parent &&
+    node.parent.callee &&
+    isReactFunction(node.parent.callee, 'memo')
+  );
 }
 
 function isInsideComponentOrHook(node) {
@@ -62,15 +95,65 @@ function isInsideComponentOrHook(node) {
         return true;
       }
     }
+    if (isForwardRefCallback(node) || isMemoCallback(node)) {
+      return true;
+    }
     node = node.parent;
   }
   return false;
 }
 
+function isUseEffectEventIdentifier(node) {
+  if (__EXPERIMENTAL__) {
+    return node.type === 'Identifier' && node.name === 'useEffectEvent';
+  }
+  return false;
+}
+
+function isUseIdentifier(node) {
+  if (__EXPERIMENTAL__) {
+    return node.type === 'Identifier' && node.name === 'use';
+  }
+  return false;
+}
+
 export default {
+  meta: {
+    type: 'problem',
+    docs: {
+      description: 'enforces the Rules of Hooks',
+      recommended: true,
+      url: 'https://reactjs.org/docs/hooks-rules.html',
+    },
+  },
   create(context) {
+    let lastEffect = null;
     const codePathReactHooksMapStack = [];
     const codePathSegmentStack = [];
+    const useEffectEventFunctions = new WeakSet();
+
+    // For a given scope, iterate through the references and add all useEffectEvent definitions. We can
+    // do this in non-Program nodes because we can rely on the assumption that useEffectEvent functions
+    // can only be declared within a component or hook at its top level.
+    function recordAllUseEffectEventFunctions(scope) {
+      for (const reference of scope.references) {
+        const parent = reference.identifier.parent;
+        if (
+          parent.type === 'VariableDeclarator' &&
+          parent.init &&
+          parent.init.type === 'CallExpression' &&
+          parent.init.callee &&
+          isUseEffectEventIdentifier(parent.init.callee)
+        ) {
+          for (const ref of reference.resolved.references) {
+            if (ref !== reference) {
+              useEffectEventFunctions.add(ref.identifier);
+            }
+          }
+        }
+      }
+    }
+
     return {
       // Maintain code segment path stack as we traverse.
       onCodePathSegmentStart: segment => codePathSegmentStack.push(segment),
@@ -114,45 +197,47 @@ export default {
          * Populates `cyclic` with cyclic segments.
          */
 
-        function countPathsFromStart(segment) {
+        function countPathsFromStart(segment, pathHistory) {
           const {cache} = countPathsFromStart;
           let paths = cache.get(segment.id);
+          const pathList = new Set(pathHistory);
 
-          // If `paths` is null then we've found a cycle! Add it to `cyclic` and
-          // any other segments which are a part of this cycle.
-          if (paths === null) {
-            if (cyclic.has(segment.id)) {
-              return 0;
-            } else {
-              cyclic.add(segment.id);
-              for (const prevSegment of segment.prevSegments) {
-                countPathsFromStart(prevSegment);
-              }
-              return 0;
+          // If `pathList` includes the current segment then we've found a cycle!
+          // We need to fill `cyclic` with all segments inside cycle
+          if (pathList.has(segment.id)) {
+            const pathArray = [...pathList];
+            const cyclicSegments = pathArray.slice(
+              pathArray.indexOf(segment.id) + 1,
+            );
+            for (const cyclicSegment of cyclicSegments) {
+              cyclic.add(cyclicSegment);
             }
+
+            return BigInt('0');
           }
+
+          // add the current segment to pathList
+          pathList.add(segment.id);
 
           // We have a cached `paths`. Return it.
           if (paths !== undefined) {
             return paths;
           }
 
-          // Compute `paths` and cache it. Guarding against cycles.
-          cache.set(segment.id, null);
           if (codePath.thrownSegments.includes(segment)) {
-            paths = 0;
+            paths = BigInt('0');
           } else if (segment.prevSegments.length === 0) {
-            paths = 1;
+            paths = BigInt('1');
           } else {
-            paths = 0;
+            paths = BigInt('0');
             for (const prevSegment of segment.prevSegments) {
-              paths += countPathsFromStart(prevSegment);
+              paths += countPathsFromStart(prevSegment, pathList);
             }
           }
 
           // If our segment is reachable then there should be at least one path
           // to it from the start of our code path.
-          if (segment.reachable && paths === 0) {
+          if (segment.reachable && paths === BigInt('0')) {
             cache.delete(segment.id);
           } else {
             cache.set(segment.id, paths);
@@ -183,43 +268,45 @@ export default {
          * Populates `cyclic` with cyclic segments.
          */
 
-        function countPathsToEnd(segment) {
+        function countPathsToEnd(segment, pathHistory) {
           const {cache} = countPathsToEnd;
           let paths = cache.get(segment.id);
+          const pathList = new Set(pathHistory);
 
-          // If `paths` is null then we've found a cycle! Add it to `cyclic` and
-          // any other segments which are a part of this cycle.
-          if (paths === null) {
-            if (cyclic.has(segment.id)) {
-              return 0;
-            } else {
-              cyclic.add(segment.id);
-              for (const nextSegment of segment.nextSegments) {
-                countPathsToEnd(nextSegment);
-              }
-              return 0;
+          // If `pathList` includes the current segment then we've found a cycle!
+          // We need to fill `cyclic` with all segments inside cycle
+          if (pathList.has(segment.id)) {
+            const pathArray = Array.from(pathList);
+            const cyclicSegments = pathArray.slice(
+              pathArray.indexOf(segment.id) + 1,
+            );
+            for (const cyclicSegment of cyclicSegments) {
+              cyclic.add(cyclicSegment);
             }
+
+            return BigInt('0');
           }
+
+          // add the current segment to pathList
+          pathList.add(segment.id);
 
           // We have a cached `paths`. Return it.
           if (paths !== undefined) {
             return paths;
           }
 
-          // Compute `paths` and cache it. Guarding against cycles.
-          cache.set(segment.id, null);
           if (codePath.thrownSegments.includes(segment)) {
-            paths = 0;
+            paths = BigInt('0');
           } else if (segment.nextSegments.length === 0) {
-            paths = 1;
+            paths = BigInt('1');
           } else {
-            paths = 0;
+            paths = BigInt('0');
             for (const nextSegment of segment.nextSegments) {
-              paths += countPathsToEnd(nextSegment);
+              paths += countPathsToEnd(nextSegment, pathList);
             }
           }
-          cache.set(segment.id, paths);
 
+          cache.set(segment.id, paths);
           return paths;
         }
 
@@ -290,7 +377,8 @@ export default {
         // `undefined` then we know either that we have an anonymous function
         // expression or our code path is not in a function. In both cases we
         // will want to error since neither are React function components or
-        // hook functions.
+        // hook functions - unless it is an anonymous function argument to
+        // forwardRef or memo.
         const codePathFunctionName = getFunctionName(codePathNode);
 
         // This is a valid code path for React hooks if we are directly in a React
@@ -301,7 +389,7 @@ export default {
         const isDirectlyInsideComponentOrHook = codePathFunctionName
           ? isComponentName(codePathFunctionName) ||
             isHook(codePathFunctionName)
-          : false;
+          : isForwardRefCallback(codePathNode) || isMemoCallback(codePathNode);
 
         // Compute the earliest finalizer level using information from the
         // cache. We expect all reachable final segments to have a cache entry
@@ -380,7 +468,8 @@ export default {
 
           for (const hook of reactHooks) {
             // Report an error if a hook may be called more then once.
-            if (cycled) {
+            // `use(...)` can be called in loops.
+            if (cycled && !isUseIdentifier(hook)) {
               context.report({
                 node: hook,
                 message:
@@ -401,7 +490,11 @@ export default {
               // path segments.
               //
               // Special case when we think there might be an early return.
-              if (!cycled && pathsFromStartToEnd !== allPathsFromStartToEnd) {
+              if (
+                !cycled &&
+                pathsFromStartToEnd !== allPathsFromStartToEnd &&
+                !isUseIdentifier(hook) // `use(...)` can be called conditionally.
+              ) {
                 const message =
                   `React Hook "${context.getSource(hook)}" is called ` +
                   'conditionally. React Hooks must be called in the exact ' +
@@ -418,30 +511,37 @@ export default {
                 codePathNode.parent.type === 'ClassProperty') &&
               codePathNode.parent.value === codePathNode
             ) {
-              // Ignore class methods for now because they produce too many
-              // false positives due to feature flag checks. We're less
-              // sensitive to them in classes because hooks would produce
-              // runtime errors in classes anyway, and because a use*()
-              // call in a class, if it works, is unambiguously *not* a hook.
+              // Custom message for hooks inside a class
+              const message =
+                `React Hook "${context.getSource(hook)}" cannot be called ` +
+                'in a class component. React Hooks must be called in a ' +
+                'React function component or a custom React Hook function.';
+              context.report({node: hook, message});
             } else if (codePathFunctionName) {
               // Custom message if we found an invalid function name.
               const message =
                 `React Hook "${context.getSource(hook)}" is called in ` +
                 `function "${context.getSource(codePathFunctionName)}" ` +
-                'which is neither a React function component or a custom ' +
-                'React Hook function.';
+                'that is neither a React function component nor a custom ' +
+                'React Hook function.' +
+                ' React component names must start with an uppercase letter.' +
+                ' React Hook names must start with the word "use".';
               context.report({node: hook, message});
             } else if (codePathNode.type === 'Program') {
-              // For now, ignore if it's in top level scope.
-              // We could warn here but there are false positives related
-              // configuring libraries like `history`.
+              // These are dangerous if you have inline requires enabled.
+              const message =
+                `React Hook "${context.getSource(hook)}" cannot be called ` +
+                'at the top level. React Hooks must be called in a ' +
+                'React function component or a custom React Hook function.';
+              context.report({node: hook, message});
             } else {
               // Assume in all other cases the user called a hook in some
               // random function callback. This should usually be true for
               // anonymous function expressions. Hopefully this is clarifying
               // enough in the common case that the incorrect message in
               // uncommon cases doesn't matter.
-              if (isSomewhereInsideComponentOrHook) {
+              // `use(...)` can be called in callbacks.
+              if (isSomewhereInsideComponentOrHook && !isUseIdentifier(hook)) {
                 const message =
                   `React Hook "${context.getSource(hook)}" cannot be called ` +
                   'inside a callback. React Hooks must be called in a ' +
@@ -470,6 +570,58 @@ export default {
           }
           reactHooks.push(node.callee);
         }
+
+        // useEffectEvent: useEffectEvent functions can be passed by reference within useEffect as well as in
+        // another useEffectEvent
+        if (
+          node.callee.type === 'Identifier' &&
+          (node.callee.name === 'useEffect' ||
+            isUseEffectEventIdentifier(node.callee)) &&
+          node.arguments.length > 0
+        ) {
+          // Denote that we have traversed into a useEffect call, and stash the CallExpr for
+          // comparison later when we exit
+          lastEffect = node;
+        }
+      },
+
+      Identifier(node) {
+        // This identifier resolves to a useEffectEvent function, but isn't being referenced in an
+        // effect or another event function. It isn't being called either.
+        if (
+          lastEffect == null &&
+          useEffectEventFunctions.has(node) &&
+          node.parent.type !== 'CallExpression'
+        ) {
+          context.report({
+            node,
+            message:
+              `\`${context.getSource(
+                node,
+              )}\` is a function created with React Hook "useEffectEvent", and can only be called from ` +
+              'the same component. They cannot be assigned to variables or passed down.',
+          });
+        }
+      },
+
+      'CallExpression:exit'(node) {
+        if (node === lastEffect) {
+          lastEffect = null;
+        }
+      },
+
+      FunctionDeclaration(node) {
+        // function MyComponent() { const onClick = useEffectEvent(...) }
+        if (isInsideComponentOrHook(node)) {
+          recordAllUseEffectEventFunctions(context.getScope());
+        }
+      },
+
+      ArrowFunctionExpression(node) {
+        // const MyComponent = () => { const onClick = useEffectEvent(...) }
+        if (isInsideComponentOrHook(node)) {
+          recordAllUseEffectEventFunctions(context.getScope());
+        }
       },
     };
   },
@@ -480,7 +632,7 @@ export default {
  * easy. For anonymous function expressions it is much harder. If you search for
  * `IsAnonymousFunctionDefinition()` in the ECMAScript spec you'll find places
  * where JS gives anonymous function expressions names. We roughly detect the
- * same AST nodes with some exceptions to better fit our usecase.
+ * same AST nodes with some exceptions to better fit our use case.
  */
 
 function getFunctionName(node) {

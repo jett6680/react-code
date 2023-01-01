@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,11 +14,9 @@ describe('ReactProfiler DevTools integration', () => {
   let React;
   let ReactFeatureFlags;
   let ReactTestRenderer;
-  let SchedulerTracing;
+  let Scheduler;
   let AdvanceTime;
-  let advanceTimeBy;
   let hook;
-  let mockNow;
 
   beforeEach(() => {
     global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = hook = {
@@ -30,23 +28,11 @@ describe('ReactProfiler DevTools integration', () => {
 
     jest.resetModules();
 
-    let currentTime = 0;
-
-    mockNow = jest.fn().mockImplementation(() => currentTime);
-
-    global.Date.now = mockNow;
-
     ReactFeatureFlags = require('shared/ReactFeatureFlags');
     ReactFeatureFlags.enableProfilerTimer = true;
-    ReactFeatureFlags.enableSchedulerTracing = true;
-    SchedulerTracing = require('scheduler/tracing');
+    Scheduler = require('scheduler');
     React = require('react');
     ReactTestRenderer = require('react-test-renderer');
-
-    ReactTestRenderer.unstable_setNowImplementation(mockNow);
-    advanceTimeBy = amount => {
-      currentTime += amount;
-    };
 
     AdvanceTime = class extends React.Component {
       static defaultProps = {
@@ -58,7 +44,7 @@ describe('ReactProfiler DevTools integration', () => {
       }
       render() {
         // Simulate time passing when this component is rendered
-        advanceTimeBy(this.props.byAmount);
+        Scheduler.unstable_advanceTime(this.props.byAmount);
         return this.props.children || null;
       }
     };
@@ -66,15 +52,15 @@ describe('ReactProfiler DevTools integration', () => {
 
   it('should auto-Profile all fibers if the DevTools hook is detected', () => {
     const App = ({multiplier}) => {
-      advanceTimeBy(2);
+      Scheduler.unstable_advanceTime(2);
       return (
-        <React.unstable_Profiler id="Profiler" onRender={onRender}>
+        <React.Profiler id="Profiler" onRender={onRender}>
           <AdvanceTime byAmount={3 * multiplier} shouldComponentUpdate={true} />
           <AdvanceTime
             byAmount={7 * multiplier}
             shouldComponentUpdate={false}
           />
-        </React.unstable_Profiler>
+        </React.Profiler>
       );
     };
 
@@ -87,15 +73,7 @@ describe('ReactProfiler DevTools integration', () => {
     // The time spent in App (above the Profiler) won't be included in the durations,
     // But needs to be accounted for in the offset times.
     expect(onRender).toHaveBeenCalledTimes(1);
-    expect(onRender).toHaveBeenCalledWith(
-      'Profiler',
-      'mount',
-      10,
-      10,
-      2,
-      12,
-      new Set(),
-    );
+    expect(onRender).toHaveBeenCalledWith('Profiler', 'mount', 10, 10, 2, 12);
     onRender.mockClear();
 
     // Measure unobservable timing required by the DevTools profiler.
@@ -112,15 +90,7 @@ describe('ReactProfiler DevTools integration', () => {
     // The time spent in App (above the Profiler) won't be included in the durations,
     // But needs to be accounted for in the offset times.
     expect(onRender).toHaveBeenCalledTimes(1);
-    expect(onRender).toHaveBeenCalledWith(
-      'Profiler',
-      'update',
-      6,
-      13,
-      14,
-      20,
-      new Set(),
-    );
+    expect(onRender).toHaveBeenCalledWith('Profiler', 'update', 6, 13, 14, 20);
 
     // Measure unobservable timing required by the DevTools profiler.
     // At this point, the base time should include both:
@@ -132,7 +102,7 @@ describe('ReactProfiler DevTools integration', () => {
   });
 
   it('should reset the fiber stack correctly after an error when profiling host roots', () => {
-    advanceTimeBy(20);
+    Scheduler.unstable_advanceTime(20);
 
     const rendered = ReactTestRenderer.create(
       <div>
@@ -140,7 +110,7 @@ describe('ReactProfiler DevTools integration', () => {
       </div>,
     );
 
-    advanceTimeBy(20);
+    Scheduler.unstable_advanceTime(20);
 
     expect(() => {
       rendered.update(
@@ -150,7 +120,7 @@ describe('ReactProfiler DevTools integration', () => {
       );
     }).toThrow();
 
-    advanceTimeBy(20);
+    Scheduler.unstable_advanceTime(20);
 
     // But this should render correctly, if the profiler's fiber stack has been reset.
     rendered.update(
@@ -168,24 +138,35 @@ describe('ReactProfiler DevTools integration', () => {
     ).toBe(7);
   });
 
-  it('should store traced interactions on the HostNode so DevTools can access them', () => {
-    // Render without an interaction
-    const rendered = ReactTestRenderer.create(<div />);
+  it('regression test: #17159', () => {
+    function Text({text}) {
+      Scheduler.unstable_yieldValue(text);
+      return text;
+    }
 
-    const root = rendered.root._currentFiber().return;
-    expect(root.stateNode.memoizedInteractions).toContainNoInteractions();
+    const root = ReactTestRenderer.create(null, {unstable_isConcurrent: true});
 
-    advanceTimeBy(10);
+    // Commit something
+    root.update(<Text text="A" />);
+    expect(Scheduler).toFlushAndYield(['A']);
+    expect(root).toMatchRenderedOutput('A');
 
-    const eventTime = mockNow();
+    // Advance time by many seconds, larger than the default expiration time
+    // for updates.
+    Scheduler.unstable_advanceTime(10000);
+    // Schedule an update.
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        root.update(<Text text="B" />);
+      });
+    } else {
+      root.update(<Text text="B" />);
+    }
 
-    // Render with an interaction
-    SchedulerTracing.unstable_trace('some event', eventTime, () => {
-      rendered.update(<div />);
-    });
+    // Update B should not instantly expire.
+    expect(Scheduler).toFlushAndYieldThrough([]);
 
-    expect(root.stateNode.memoizedInteractions).toMatchInteractions([
-      {name: 'some event', timestamp: eventTime},
-    ]);
+    expect(Scheduler).toFlushAndYield(['B']);
+    expect(root).toMatchRenderedOutput('B');
   });
 });

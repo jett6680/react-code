@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -50,7 +50,9 @@ describe('renderSubtreeIntoContainer', () => {
           function() {
             renderSubtreeIntoContainer(this, <Component />, portal);
           }.bind(this),
-        ).not.toThrow();
+        ).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -135,11 +137,19 @@ describe('renderSubtreeIntoContainer', () => {
       }
 
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <Component />, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Component />, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
 
       componentDidUpdate() {
-        renderSubtreeIntoContainer(this, <Component />, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Component />, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -183,11 +193,19 @@ describe('renderSubtreeIntoContainer', () => {
       }
 
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <Component />, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Component />, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
 
       componentDidUpdate() {
-        renderSubtreeIntoContainer(this, <Component />, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Component />, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -208,7 +226,11 @@ describe('renderSubtreeIntoContainer', () => {
       }
 
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <div>hello</div>, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <div>hello</div>, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -238,7 +260,11 @@ describe('renderSubtreeIntoContainer', () => {
         return null;
       }
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <Child />, portal);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Child />, portal);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -269,7 +295,11 @@ describe('renderSubtreeIntoContainer', () => {
         return {value: this.props.value};
       }
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <Middle />, portal1);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Middle />, portal1);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
       static childContextTypes = {
         value: PropTypes.string.isRequired,
@@ -281,7 +311,11 @@ describe('renderSubtreeIntoContainer', () => {
         return null;
       }
       componentDidMount() {
-        renderSubtreeIntoContainer(this, <Child />, portal2);
+        expect(() => {
+          renderSubtreeIntoContainer(this, <Child />, portal2);
+        }).toErrorDev(
+          'ReactDOM.unstable_renderSubtreeIntoContainer() is no longer supported',
+        );
       }
     }
 
@@ -312,11 +346,11 @@ describe('renderSubtreeIntoContainer', () => {
     }).toThrow(
       __DEV__
         ? '_processChildContext is not available in React 16+. This likely ' +
-          'means you have multiple copies of React and are attempting to nest ' +
-          'a React 15 tree inside a React 16 tree using ' +
-          "unstable_renderSubtreeIntoContainer, which isn't supported. Try to " +
-          'make sure you have only one copy of React (and ideally, switch to ' +
-          'ReactDOM.createPortal).'
+            'means you have multiple copies of React and are attempting to nest ' +
+            'a React 15 tree inside a React 16 tree using ' +
+            "unstable_renderSubtreeIntoContainer, which isn't supported. Try to " +
+            'make sure you have only one copy of React (and ideally, switch to ' +
+            'ReactDOM.createPortal).'
         : "Cannot read property '_processChildContext' of undefined",
     );
   });

@@ -1,548 +1,512 @@
 /**
- * Copyright (c) 2013-present, Facebook, Inc.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
+ * @jest-environment node
  */
+
+/* eslint-disable no-for-of-loops/no-for-of-loops */
 
 'use strict';
 
-let runWithPriority;
-let ImmediatePriority;
-let UserBlockingPriority;
-let NormalPriority;
-let scheduleCallback;
+let Scheduler;
+let runtime;
+let performance;
 let cancelCallback;
-let wrapCallback;
-let getCurrentPriorityLevel;
+let scheduleCallback;
+let requestPaint;
 let shouldYield;
-let flushWork;
-let advanceTime;
-let doWork;
-let yieldedValues;
-let yieldValue;
-let clearYieldedValues;
+let NormalPriority;
 
-describe('Scheduler', () => {
+// The Scheduler implementation uses browser APIs like `MessageChannel` and
+// `setTimeout` to schedule work on the main thread. Most of our tests treat
+// these as implementation details; however, the sequence and timing of these
+// APIs are not precisely specified, and can vary across browsers.
+//
+// To prevent regressions, we need the ability to simulate specific edge cases
+// that we may encounter in various browsers.
+//
+// This test suite mocks all browser methods used in our implementation. It
+// assumes as little as possible about the order and timing of events.
+describe('SchedulerBrowser', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
     jest.resetModules();
+    runtime = installMockBrowserRuntime();
+    jest.unmock('scheduler');
 
-    const JestMockScheduler = require('jest-mock-scheduler');
-    JestMockScheduler.mockRestore();
+    performance = global.performance;
+    Scheduler = require('scheduler');
+    cancelCallback = Scheduler.unstable_cancelCallback;
+    scheduleCallback = Scheduler.unstable_scheduleCallback;
+    NormalPriority = Scheduler.unstable_NormalPriority;
+    requestPaint = Scheduler.unstable_requestPaint;
+    shouldYield = Scheduler.unstable_shouldYield;
+  });
 
-    let _flushWork = null;
-    let isFlushing = false;
-    let timeoutID = -1;
-    let endOfFrame = -1;
-    let hasMicrotask = false;
+  afterEach(() => {
+    delete global.performance;
+
+    if (!runtime.isLogEmpty()) {
+      throw Error('Test exited without clearing log.');
+    }
+  });
+
+  function installMockBrowserRuntime() {
+    let hasPendingMessageEvent = false;
+    let isFiringMessageEvent = false;
+    let hasPendingDiscreteEvent = false;
+    let hasPendingContinuousEvent = false;
+
+    let timerIDCounter = 0;
+    // let timerIDs = new Map();
+
+    let eventLog = [];
 
     let currentTime = 0;
 
-    flushWork = frameSize => {
-      if (isFlushing) {
-        throw new Error('Already flushing work.');
-      }
-      if (frameSize === null || frameSize === undefined) {
-        frameSize = Infinity;
-      }
-      if (_flushWork === null) {
-        throw new Error('No work is scheduled.');
-      }
-      timeoutID = -1;
-      endOfFrame = currentTime + frameSize;
-      try {
-        isFlushing = true;
-        _flushWork(false);
-      } finally {
-        isFlushing = false;
-        endOfFrame = -1;
-        if (hasMicrotask) {
-          onTimeout();
-        }
-      }
-      const yields = yieldedValues;
-      yieldedValues = [];
-      return yields;
+    global.performance = {
+      now() {
+        return currentTime;
+      },
     };
 
-    advanceTime = ms => {
+    // Delete node provide setImmediate so we fall through to MessageChannel.
+    delete global.setImmediate;
+
+    global.setTimeout = (cb, delay) => {
+      const id = timerIDCounter++;
+      log(`Set Timer`);
+      // TODO
+      return id;
+    };
+    global.clearTimeout = id => {
+      // TODO
+    };
+
+    const port1 = {};
+    const port2 = {
+      postMessage() {
+        if (hasPendingMessageEvent) {
+          throw Error('Message event already scheduled');
+        }
+        log('Post Message');
+        hasPendingMessageEvent = true;
+      },
+    };
+    global.MessageChannel = function MessageChannel() {
+      this.port1 = port1;
+      this.port2 = port2;
+    };
+
+    const scheduling = {
+      isInputPending(options) {
+        if (this !== scheduling) {
+          throw new Error(
+            'isInputPending called with incorrect `this` context',
+          );
+        }
+
+        return (
+          hasPendingDiscreteEvent ||
+          (options && options.includeContinuous && hasPendingContinuousEvent)
+        );
+      },
+    };
+
+    global.navigator = {scheduling};
+
+    function ensureLogIsEmpty() {
+      if (eventLog.length !== 0) {
+        throw Error('Log is not empty. Call assertLog before continuing.');
+      }
+    }
+    function advanceTime(ms) {
       currentTime += ms;
-      jest.advanceTimersByTime(ms);
-    };
-
-    doWork = (label, timeCost) => {
-      if (typeof timeCost !== 'number') {
-        throw new Error('Second arg must be a number.');
+    }
+    function resetTime() {
+      currentTime = 0;
+    }
+    function fireMessageEvent() {
+      ensureLogIsEmpty();
+      if (!hasPendingMessageEvent) {
+        throw Error('No message event was scheduled');
       }
-      advanceTime(timeCost);
-      yieldValue(label);
-    };
+      hasPendingMessageEvent = false;
+      const onMessage = port1.onmessage;
+      log('Message Event');
 
-    yieldedValues = [];
-    yieldValue = value => {
-      yieldedValues.push(value);
-    };
-
-    clearYieldedValues = () => {
-      const yields = yieldedValues;
-      yieldedValues = [];
-      return yields;
-    };
-
-    function onTimeout() {
-      if (_flushWork === null) {
-        return;
+      isFiringMessageEvent = true;
+      try {
+        onMessage();
+      } finally {
+        isFiringMessageEvent = false;
+        if (hasPendingDiscreteEvent) {
+          log('Discrete Event');
+          hasPendingDiscreteEvent = false;
+        }
+        if (hasPendingContinuousEvent) {
+          log('Continuous Event');
+          hasPendingContinuousEvent = false;
+        }
       }
-      if (isFlushing) {
-        hasMicrotask = true;
+    }
+    function scheduleDiscreteEvent() {
+      if (isFiringMessageEvent) {
+        hasPendingDiscreteEvent = true;
       } else {
-        try {
-          isFlushing = true;
-          _flushWork(true);
-        } finally {
-          hasMicrotask = false;
-          isFlushing = false;
-        }
+        log('Discrete Event');
       }
     }
-
-    function requestHostCallback(fw, absoluteTimeout) {
-      if (_flushWork !== null) {
-        throw new Error('Work is already scheduled.');
+    function scheduleContinuousEvent() {
+      if (isFiringMessageEvent) {
+        hasPendingContinuousEvent = true;
+      } else {
+        log('Continuous Event');
       }
-      _flushWork = fw;
-      timeoutID = setTimeout(onTimeout, absoluteTimeout - currentTime);
     }
-    function cancelHostCallback() {
-      if (_flushWork === null) {
-        throw new Error('No work is scheduled.');
-      }
-      _flushWork = null;
-      clearTimeout(timeoutID);
+    function log(val) {
+      eventLog.push(val);
     }
-    function shouldYieldToHost() {
-      return endOfFrame <= currentTime;
+    function isLogEmpty() {
+      return eventLog.length === 0;
     }
-    function getCurrentTime() {
-      return currentTime;
+    function assertLog(expected) {
+      const actual = eventLog;
+      eventLog = [];
+      expect(actual).toEqual(expected);
     }
-
-    // Override host implementation
-    delete global.performance;
-    global.Date.now = () => {
-      return currentTime;
+    return {
+      advanceTime,
+      resetTime,
+      fireMessageEvent,
+      log,
+      isLogEmpty,
+      assertLog,
+      scheduleDiscreteEvent,
+      scheduleContinuousEvent,
     };
+  }
 
-    window._schedMock = [
-      requestHostCallback,
-      cancelHostCallback,
-      shouldYieldToHost,
-      getCurrentTime,
-    ];
-
-    const Schedule = require('scheduler');
-    runWithPriority = Schedule.unstable_runWithPriority;
-    ImmediatePriority = Schedule.unstable_ImmediatePriority;
-    UserBlockingPriority = Schedule.unstable_UserBlockingPriority;
-    NormalPriority = Schedule.unstable_NormalPriority;
-    scheduleCallback = Schedule.unstable_scheduleCallback;
-    cancelCallback = Schedule.unstable_cancelCallback;
-    wrapCallback = Schedule.unstable_wrapCallback;
-    getCurrentPriorityLevel = Schedule.unstable_getCurrentPriorityLevel;
-    shouldYield = Schedule.unstable_shouldYield;
+  it('task that finishes before deadline', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task');
+    });
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'Task']);
   });
 
-  it('flushes work incrementally', () => {
-    scheduleCallback(() => doWork('A', 100));
-    scheduleCallback(() => doWork('B', 200));
-    scheduleCallback(() => doWork('C', 300));
-    scheduleCallback(() => doWork('D', 400));
+  it('task with continuation', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task');
+      // Request paint so that we yield at the end of the frame interval
+      requestPaint();
+      while (!Scheduler.unstable_shouldYield()) {
+        runtime.advanceTime(1);
+      }
+      runtime.log(`Yield at ${performance.now()}ms`);
+      return () => {
+        runtime.log('Continuation');
+      };
+    });
+    runtime.assertLog(['Post Message']);
 
-    expect(flushWork(300)).toEqual(['A', 'B']);
-    expect(flushWork(300)).toEqual(['C']);
-    expect(flushWork(400)).toEqual(['D']);
-  });
-
-  it('flushes work until framesize reached', () => {
-    scheduleCallback(() => doWork('A1_100', 100));
-    scheduleCallback(() => doWork('A2_200', 200));
-    scheduleCallback(() => doWork('B1_100', 100));
-    scheduleCallback(() => doWork('B2_200', 200));
-    scheduleCallback(() => doWork('C1_300', 300));
-    scheduleCallback(() => doWork('C2_300', 300));
-    scheduleCallback(() => doWork('D_3000', 3000));
-    scheduleCallback(() => doWork('E1_300', 300));
-    scheduleCallback(() => doWork('E2_200', 200));
-    scheduleCallback(() => doWork('F1_200', 200));
-    scheduleCallback(() => doWork('F2_200', 200));
-    scheduleCallback(() => doWork('F3_300', 300));
-    scheduleCallback(() => doWork('F4_500', 500));
-    scheduleCallback(() => doWork('F5_200', 200));
-    scheduleCallback(() => doWork('F6_20', 20));
-
-    expect(Date.now()).toEqual(0);
-    // No time left after A1_100 and A2_200 are run
-    expect(flushWork(300)).toEqual(['A1_100', 'A2_200']);
-    expect(Date.now()).toEqual(300);
-    // B2_200 is started as there is still time left after B1_100
-    expect(flushWork(101)).toEqual(['B1_100', 'B2_200']);
-    expect(Date.now()).toEqual(600);
-    // C1_300 is started as there is even a little frame time
-    expect(flushWork(1)).toEqual(['C1_300']);
-    expect(Date.now()).toEqual(900);
-    // C2_300 is started even though there is no frame time
-    expect(flushWork(0)).toEqual(['C2_300']);
-    expect(Date.now()).toEqual(1200);
-    // D_3000 is very slow, but won't affect next flushes (if no
-    // timeouts happen)
-    expect(flushWork(100)).toEqual(['D_3000']);
-    expect(Date.now()).toEqual(4200);
-    expect(flushWork(400)).toEqual(['E1_300', 'E2_200']);
-    expect(Date.now()).toEqual(4700);
-    // Default timeout is 5000, so during F2_200, work will timeout and are done
-    // in reverse, including F2_200
-    expect(flushWork(1000)).toEqual([
-      'F1_200',
-      'F2_200',
-      'F3_300',
-      'F4_500',
-      'F5_200',
-      'F6_20',
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Task',
+      'Yield at 5ms',
+      'Post Message',
     ]);
-    expect(Date.now()).toEqual(6120);
+
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'Continuation']);
   });
 
-  it('cancels work', () => {
-    scheduleCallback(() => doWork('A', 100));
-    const callbackHandleB = scheduleCallback(() => doWork('B', 200));
-    scheduleCallback(() => doWork('C', 300));
+  it('multiple tasks', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('A');
+    });
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('B');
+    });
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'A', 'B']);
+  });
 
-    cancelCallback(callbackHandleB);
-
-    expect(flushWork()).toEqual([
+  it('multiple tasks with a yield in between', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('A');
+      runtime.advanceTime(4999);
+    });
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('B');
+    });
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
       'A',
-      // B should have been cancelled
-      'C',
+      // Ran out of time. Post a continuation event.
+      'Post Message',
     ]);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'B']);
   });
 
-  it('executes the highest priority callbacks first', () => {
-    scheduleCallback(() => doWork('A', 100));
-    scheduleCallback(() => doWork('B', 100));
+  it('cancels tasks', () => {
+    const task = scheduleCallback(NormalPriority, () => {
+      runtime.log('Task');
+    });
+    runtime.assertLog(['Post Message']);
+    cancelCallback(task);
+    runtime.assertLog([]);
+  });
 
-    // Yield before B is flushed
-    expect(flushWork(100)).toEqual(['A']);
+  it('throws when a task errors then continues in a new event', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Oops!');
+      throw Error('Oops!');
+    });
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Yay');
+    });
+    runtime.assertLog(['Post Message']);
 
-    runWithPriority(UserBlockingPriority, () => {
-      scheduleCallback(() => doWork('C', 100));
-      scheduleCallback(() => doWork('D', 100));
+    expect(() => runtime.fireMessageEvent()).toThrow('Oops!');
+    runtime.assertLog(['Message Event', 'Oops!', 'Post Message']);
+
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'Yay']);
+  });
+
+  it('schedule new task after queue has emptied', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('A');
     });
 
-    // C and D should come first, because they are higher priority
-    expect(flushWork()).toEqual(['C', 'D', 'B']);
-  });
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'A']);
 
-  it('expires work', () => {
-    scheduleCallback(() => doWork('A', 100));
-    runWithPriority(UserBlockingPriority, () => {
-      scheduleCallback(() => doWork('B', 100));
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('B');
     });
-    scheduleCallback(() => doWork('C', 100));
-    runWithPriority(UserBlockingPriority, () => {
-      scheduleCallback(() => doWork('D', 100));
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'B']);
+  });
+
+  it('schedule new task after a cancellation', () => {
+    const handle = scheduleCallback(NormalPriority, () => {
+      runtime.log('A');
     });
 
-    // Advance time, but not by enough to expire any work
-    advanceTime(249);
-    expect(clearYieldedValues()).toEqual([]);
+    runtime.assertLog(['Post Message']);
+    cancelCallback(handle);
 
-    // Advance by just a bit more to expire the high pri callbacks
-    advanceTime(1);
-    expect(clearYieldedValues()).toEqual(['B', 'D']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event']);
 
-    // Expire the rest
-    advanceTime(10000);
-    expect(clearYieldedValues()).toEqual(['A', 'C']);
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('B');
+    });
+    runtime.assertLog(['Post Message']);
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'B']);
   });
 
-  it('has a default expiration of ~5 seconds', () => {
-    scheduleCallback(() => doWork('A', 100));
-
-    advanceTime(4999);
-    expect(clearYieldedValues()).toEqual([]);
-
-    advanceTime(1);
-    expect(clearYieldedValues()).toEqual(['A']);
-  });
-
-  it('continues working on same task after yielding', () => {
-    scheduleCallback(() => doWork('A', 100));
-    scheduleCallback(() => doWork('B', 100));
-
-    const tasks = [['C1', 100], ['C2', 100], ['C3', 100]];
-    const C = () => {
-      while (tasks.length > 0) {
-        doWork(...tasks.shift());
-        if (shouldYield()) {
-          yieldValue('Yield!');
-          return C;
-        }
+  it('when isInputPending is available, we can wait longer before yielding', () => {
+    function blockUntilSchedulerAsksToYield() {
+      while (!Scheduler.unstable_shouldYield()) {
+        runtime.advanceTime(1);
       }
-    };
+      runtime.log(`Yield at ${performance.now()}ms`);
+    }
 
-    scheduleCallback(C);
-
-    scheduleCallback(() => doWork('D', 100));
-    scheduleCallback(() => doWork('E', 100));
-
-    expect(flushWork(300)).toEqual(['A', 'B', 'C1', 'Yield!']);
-
-    expect(flushWork()).toEqual(['C2', 'C3', 'D', 'E']);
-  });
-
-  it('continuation callbacks inherit the expiration of the previous callback', () => {
-    const tasks = [['A', 125], ['B', 124], ['C', 100], ['D', 100]];
-    const work = () => {
-      while (tasks.length > 0) {
-        doWork(...tasks.shift());
-        if (shouldYield()) {
-          yieldValue('Yield!');
-          return work;
-        }
-      }
-    };
-
-    // Schedule a high priority callback
-    runWithPriority(UserBlockingPriority, () => scheduleCallback(work));
-
-    // Flush until just before the expiration time
-    expect(flushWork(249)).toEqual(['A', 'B', 'Yield!']);
-
-    // Advance time by just a bit more. This should expire all the remaining work.
-    advanceTime(1);
-    expect(clearYieldedValues()).toEqual(['C', 'D']);
-  });
-
-  it('nested callbacks inherit the priority of the currently executing callback', () => {
-    runWithPriority(UserBlockingPriority, () => {
-      scheduleCallback(() => {
-        doWork('Parent callback', 100);
-        scheduleCallback(() => {
-          doWork('Nested callback', 100);
-        });
-      });
+    // First show what happens when we don't request a paint
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task with no pending input');
+      blockUntilSchedulerAsksToYield();
     });
+    runtime.assertLog(['Post Message']);
 
-    expect(flushWork(100)).toEqual(['Parent callback']);
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Task with no pending input',
+      // Even though there's no input, eventually Scheduler will yield
+      // regardless in case there's a pending main thread task we don't know
+      // about, like a network event.
+      gate(flags =>
+        flags.enableIsInputPending
+          ? 'Yield at 300ms'
+          : // When isInputPending is disabled, we always yield quickly
+            'Yield at 5ms',
+      ),
+    ]);
 
-    // The nested callback has user-blocking priority, so it should
-    // expire quickly.
-    advanceTime(250 + 100);
-    expect(clearYieldedValues()).toEqual(['Nested callback']);
-  });
+    runtime.resetTime();
 
-  it('continuations are interrupted by higher priority work', () => {
-    const tasks = [['A', 100], ['B', 100], ['C', 100], ['D', 100]];
-    const work = () => {
-      while (tasks.length > 0) {
-        doWork(...tasks.shift());
-        if (tasks.length > 0 && shouldYield()) {
-          yieldValue('Yield!');
-          return work;
-        }
-      }
-    };
-    scheduleCallback(work);
-    expect(flushWork(100)).toEqual(['A', 'Yield!']);
-
-    runWithPriority(UserBlockingPriority, () => {
-      scheduleCallback(() => doWork('High pri', 100));
+    // Now do the same thing, but while the task is running, simulate an
+    // input event.
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task with pending input');
+      runtime.scheduleDiscreteEvent();
+      blockUntilSchedulerAsksToYield();
     });
+    runtime.assertLog(['Post Message']);
 
-    expect(flushWork()).toEqual(['High pri', 'B', 'C', 'D']);
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Task with pending input',
+      // This time we yielded quickly to unblock the discrete event.
+      'Yield at 5ms',
+      'Discrete Event',
+    ]);
   });
 
   it(
-    'continutations are interrupted by higher priority work scheduled ' +
-      'inside an executing callback',
+    'isInputPending will also check for continuous inputs, but after a ' +
+      'slightly larger threshold',
     () => {
-      const tasks = [['A', 100], ['B', 100], ['C', 100], ['D', 100]];
-      const work = () => {
-        while (tasks.length > 0) {
-          const task = tasks.shift();
-          doWork(...task);
-          if (task[0] === 'B') {
-            // Schedule high pri work from inside another callback
-            yieldValue('Schedule high pri');
-            runWithPriority(UserBlockingPriority, () =>
-              scheduleCallback(() => doWork('High pri', 100)),
-            );
-          }
-          if (tasks.length > 0 && shouldYield()) {
-            yieldValue('Yield!');
-            return work;
-          }
+      function blockUntilSchedulerAsksToYield() {
+        while (!Scheduler.unstable_shouldYield()) {
+          runtime.advanceTime(1);
         }
-      };
-      scheduleCallback(work);
-      expect(flushWork()).toEqual([
-        'A',
-        'B',
-        'Schedule high pri',
-        // Even though there's time left in the frame, the low pri callback
-        // should yield to the high pri callback
-        'Yield!',
-        'High pri',
-        // Continue low pri work
-        'C',
-        'D',
+        runtime.log(`Yield at ${performance.now()}ms`);
+      }
+
+      // First show what happens when we don't request a paint
+      scheduleCallback(NormalPriority, () => {
+        runtime.log('Task with no pending input');
+        blockUntilSchedulerAsksToYield();
+      });
+      runtime.assertLog(['Post Message']);
+
+      runtime.fireMessageEvent();
+      runtime.assertLog([
+        'Message Event',
+        'Task with no pending input',
+        // Even though there's no input, eventually Scheduler will yield
+        // regardless in case there's a pending main thread task we don't know
+        // about, like a network event.
+        gate(flags =>
+          flags.enableIsInputPending
+            ? 'Yield at 300ms'
+            : // When isInputPending is disabled, we always yield quickly
+              'Yield at 5ms',
+        ),
+      ]);
+
+      runtime.resetTime();
+
+      // Now do the same thing, but while the task is running, simulate a
+      // continuous input event.
+      scheduleCallback(NormalPriority, () => {
+        runtime.log('Task with continuous input');
+        runtime.scheduleContinuousEvent();
+        blockUntilSchedulerAsksToYield();
+      });
+      runtime.assertLog(['Post Message']);
+
+      runtime.fireMessageEvent();
+      runtime.assertLog([
+        'Message Event',
+        'Task with continuous input',
+        // This time we yielded quickly to unblock the continuous event. But not
+        // as quickly as for a discrete event.
+        gate(flags =>
+          flags.enableIsInputPending
+            ? 'Yield at 50ms'
+            : // When isInputPending is disabled, we always yield quickly
+              'Yield at 5ms',
+        ),
+        'Continuous Event',
       ]);
     },
   );
 
-  it('immediate callbacks fire at the end of outermost event', () => {
-    runWithPriority(ImmediatePriority, () => {
-      scheduleCallback(() => yieldValue('A'));
-      scheduleCallback(() => yieldValue('B'));
-      // Nested event
-      runWithPriority(ImmediatePriority, () => {
-        scheduleCallback(() => yieldValue('C'));
-        // Nothing should have fired yet
-        expect(clearYieldedValues()).toEqual([]);
-      });
-      // Nothing should have fired yet
-      expect(clearYieldedValues()).toEqual([]);
+  it('requestPaint forces a yield at the end of the next frame interval', () => {
+    function blockUntilSchedulerAsksToYield() {
+      while (!Scheduler.unstable_shouldYield()) {
+        runtime.advanceTime(1);
+      }
+      runtime.log(`Yield at ${performance.now()}ms`);
+    }
+
+    // First show what happens when we don't request a paint
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task with no paint');
+      blockUntilSchedulerAsksToYield();
     });
-    // The callbacks were called at the end of the outer event
-    expect(clearYieldedValues()).toEqual(['A', 'B', 'C']);
-  });
+    runtime.assertLog(['Post Message']);
 
-  it('wrapped callbacks have same signature as original callback', () => {
-    const wrappedCallback = wrapCallback((...args) => ({args}));
-    expect(wrappedCallback('a', 'b')).toEqual({args: ['a', 'b']});
-  });
-
-  it('wrapped callbacks inherit the current priority', () => {
-    const wrappedCallback = wrapCallback(() => {
-      scheduleCallback(() => {
-        doWork('Normal', 100);
-      });
-    });
-    const wrappedInteractiveCallback = runWithPriority(
-      UserBlockingPriority,
-      () =>
-        wrapCallback(() => {
-          scheduleCallback(() => {
-            doWork('User-blocking', 100);
-          });
-        }),
-    );
-
-    // This should schedule a normal callback
-    wrappedCallback();
-    // This should schedule an user-blocking callback
-    wrappedInteractiveCallback();
-
-    advanceTime(249);
-    expect(clearYieldedValues()).toEqual([]);
-    advanceTime(1);
-    expect(clearYieldedValues()).toEqual(['User-blocking']);
-
-    advanceTime(10000);
-    expect(clearYieldedValues()).toEqual(['Normal']);
-  });
-
-  it('wrapped callbacks inherit the current priority even when nested', () => {
-    const wrappedCallback = wrapCallback(() => {
-      scheduleCallback(() => {
-        doWork('Normal', 100);
-      });
-    });
-    const wrappedInteractiveCallback = runWithPriority(
-      UserBlockingPriority,
-      () =>
-        wrapCallback(() => {
-          scheduleCallback(() => {
-            doWork('User-blocking', 100);
-          });
-        }),
-    );
-
-    runWithPriority(UserBlockingPriority, () => {
-      // This should schedule a normal callback
-      wrappedCallback();
-      // This should schedule an user-blocking callback
-      wrappedInteractiveCallback();
-    });
-
-    advanceTime(249);
-    expect(clearYieldedValues()).toEqual([]);
-    advanceTime(1);
-    expect(clearYieldedValues()).toEqual(['User-blocking']);
-
-    advanceTime(10000);
-    expect(clearYieldedValues()).toEqual(['Normal']);
-  });
-
-  it('immediate callbacks fire at the end of callback', () => {
-    const immediateCallback = runWithPriority(ImmediatePriority, () =>
-      wrapCallback(() => {
-        scheduleCallback(() => yieldValue('callback'));
-      }),
-    );
-    immediateCallback();
-
-    // The callback was called at the end of the outer event
-    expect(clearYieldedValues()).toEqual(['callback']);
-  });
-
-  it("immediate callbacks fire even if there's an error", () => {
-    expect(() => {
-      runWithPriority(ImmediatePriority, () => {
-        scheduleCallback(() => {
-          yieldValue('A');
-          throw new Error('Oops A');
-        });
-        scheduleCallback(() => {
-          yieldValue('B');
-        });
-        scheduleCallback(() => {
-          yieldValue('C');
-          throw new Error('Oops C');
-        });
-      });
-    }).toThrow('Oops A');
-
-    expect(clearYieldedValues()).toEqual(['A']);
-
-    // B and C flush in a subsequent event. That way, the second error is not
-    // swallowed.
-    expect(() => flushWork(0)).toThrow('Oops C');
-    expect(clearYieldedValues()).toEqual(['B', 'C']);
-  });
-
-  it('exposes the current priority level', () => {
-    yieldValue(getCurrentPriorityLevel());
-    runWithPriority(ImmediatePriority, () => {
-      yieldValue(getCurrentPriorityLevel());
-      runWithPriority(NormalPriority, () => {
-        yieldValue(getCurrentPriorityLevel());
-        runWithPriority(UserBlockingPriority, () => {
-          yieldValue(getCurrentPriorityLevel());
-        });
-      });
-      yieldValue(getCurrentPriorityLevel());
-    });
-
-    expect(clearYieldedValues()).toEqual([
-      NormalPriority,
-      ImmediatePriority,
-      NormalPriority,
-      UserBlockingPriority,
-      ImmediatePriority,
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Task with no paint',
+      gate(flags =>
+        flags.enableIsInputPending
+          ? 'Yield at 300ms'
+          : // When isInputPending is disabled, we always yield quickly
+            'Yield at 5ms',
+      ),
     ]);
+
+    runtime.resetTime();
+
+    // Now do the same thing, but call requestPaint inside the task
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Task with paint');
+      requestPaint();
+      blockUntilSchedulerAsksToYield();
+    });
+    runtime.assertLog(['Post Message']);
+
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Task with paint',
+      // This time we yielded quickly (5ms) because we requested a paint.
+      'Yield at 5ms',
+    ]);
+  });
+
+  it('yielding continues in a new task regardless of how much time is remaining', () => {
+    scheduleCallback(NormalPriority, () => {
+      runtime.log('Original Task');
+      runtime.log('shouldYield: ' + shouldYield());
+      runtime.log('Return a continuation');
+      return () => {
+        runtime.log('Continuation Task');
+      };
+    });
+    runtime.assertLog(['Post Message']);
+
+    runtime.fireMessageEvent();
+    runtime.assertLog([
+      'Message Event',
+      'Original Task',
+      // Immediately before returning a continuation, `shouldYield` returns
+      // false, which means there must be time remaining in the frame.
+      'shouldYield: false',
+      'Return a continuation',
+
+      // The continuation should be scheduled in a separate macrotask even
+      // though there's time remaining.
+      'Post Message',
+    ]);
+
+    // No time has elapsed
+    expect(performance.now()).toBe(0);
+
+    runtime.fireMessageEvent();
+    runtime.assertLog(['Message Event', 'Continuation Task']);
   });
 });

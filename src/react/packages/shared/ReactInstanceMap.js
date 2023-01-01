@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -21,17 +21,17 @@
  * supported we can rename it.
  */
 export function remove(key) {
-  key._reactInternalFiber = undefined;
+  key._reactInternals = undefined;
 }
 
 export function get(key) {
-  return key._reactInternalFiber;
+  return key._reactInternals;
 }
 
 export function has(key) {
-  return key._reactInternalFiber !== undefined;
+  return key._reactInternals !== undefined;
 }
 
 export function set(key, value) {
-  key._reactInternalFiber = value;
+  key._reactInternals = value;
 }

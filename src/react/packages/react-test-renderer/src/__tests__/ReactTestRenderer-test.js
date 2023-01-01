@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,22 +9,32 @@
 
 'use strict';
 
-const ReactDOM = require('react-dom');
-
-// Isolate test renderer.
-jest.resetModules();
-const React = require('react');
-const ReactCache = require('react-cache');
-const ReactTestRenderer = require('react-test-renderer');
+let ReactDOM;
+let React;
+let ReactCache;
+let ReactTestRenderer;
+let Scheduler;
 
 describe('ReactTestRenderer', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    ReactDOM = require('react-dom');
+
+    // Isolate test renderer.
+    jest.resetModules();
+    React = require('react');
+    ReactCache = require('react-cache');
+    ReactTestRenderer = require('react-test-renderer');
+    Scheduler = require('scheduler');
+  });
+
   it('should warn if used to render a ReactDOM portal', () => {
     const container = document.createElement('div');
     expect(() => {
       expect(() => {
         ReactTestRenderer.create(ReactDOM.createPortal('foo', container));
       }).toThrow();
-    }).toWarnDev('An invalid container has been provided.', {
+    }).toErrorDev('An invalid container has been provided.', {
       withoutStack: true,
     });
   });
@@ -50,7 +60,7 @@ describe('ReactTestRenderer', () => {
       };
     });
 
-    it('for root Suspense components', async done => {
+    it('for root Suspense components', async () => {
       const App = ({text}) => {
         return (
           <React.Suspense fallback="fallback">
@@ -62,6 +72,7 @@ describe('ReactTestRenderer', () => {
       const root = ReactTestRenderer.create(<App text="initial" />);
       PendingResources.initial('initial');
       await Promise.resolve();
+      Scheduler.unstable_flushAll();
       expect(root.toJSON()).toEqual('initial');
 
       root.update(<App text="dynamic" />);
@@ -69,12 +80,11 @@ describe('ReactTestRenderer', () => {
 
       PendingResources.dynamic('dynamic');
       await Promise.resolve();
+      Scheduler.unstable_flushAll();
       expect(root.toJSON()).toEqual('dynamic');
-
-      done();
     });
 
-    it('for nested Suspense components', async done => {
+    it('for nested Suspense components', async () => {
       const App = ({text}) => {
         return (
           <div>
@@ -88,6 +98,7 @@ describe('ReactTestRenderer', () => {
       const root = ReactTestRenderer.create(<App text="initial" />);
       PendingResources.initial('initial');
       await Promise.resolve();
+      Scheduler.unstable_flushAll();
       expect(root.toJSON().children).toEqual(['initial']);
 
       root.update(<App text="dynamic" />);
@@ -95,9 +106,8 @@ describe('ReactTestRenderer', () => {
 
       PendingResources.dynamic('dynamic');
       await Promise.resolve();
+      Scheduler.unstable_flushAll();
       expect(root.toJSON().children).toEqual(['dynamic']);
-
-      done();
     });
   });
 });

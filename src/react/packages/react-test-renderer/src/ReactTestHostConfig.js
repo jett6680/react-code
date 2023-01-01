@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,34 +7,30 @@
  * @flow
  */
 
-import warning from 'shared/warning';
-import {
-  nowImplementation as TestRendererSchedulingNowImplementation,
-  scheduleDeferredCallback as TestRendererSchedulingScheduleDeferredCallback,
-  cancelDeferredCallback as TestRendererSchedulingCancelDeferredCallback,
-  shouldYield as TestRendererSchedulingShouldYield,
-} from './ReactTestRendererScheduling';
+import isArray from 'shared/isArray';
+import {DefaultEventPriority} from 'react-reconciler/src/ReactEventPriorities';
 
 export type Type = string;
 export type Props = Object;
-export type Container = {|
+export type Container = {
   children: Array<Instance | TextInstance>,
   createNodeMock: Function,
   tag: 'CONTAINER',
-|};
-export type Instance = {|
+};
+export type Instance = {
   type: string,
   props: Object,
   isHidden: boolean,
   children: Array<Instance | TextInstance>,
+  internalInstanceHandle: Object,
   rootContainerInstance: Container,
   tag: 'INSTANCE',
-|};
-export type TextInstance = {|
+};
+export type TextInstance = {
   text: string,
   isHidden: boolean,
   tag: 'TEXT',
-|};
+};
 export type HydratableInstance = Instance | TextInstance;
 export type PublicInstance = Instance | TextInstance;
 export type HostContext = Object;
@@ -42,25 +38,38 @@ export type UpdatePayload = Object;
 export type ChildSet = void; // Unused
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
+export type EventResponder = any;
 
-export * from 'shared/HostConfigWithNoPersistence';
-export * from 'shared/HostConfigWithNoHydration';
+export type RendererInspectionConfig = $ReadOnly<{}>;
+
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMicrotasks';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoResources';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoSingletons';
 
 const NO_CONTEXT = {};
 const UPDATE_SIGNAL = {};
+const nodeToInstanceMap = new WeakMap();
+
 if (__DEV__) {
   Object.freeze(NO_CONTEXT);
   Object.freeze(UPDATE_SIGNAL);
 }
 
-export function getPublicInstance(inst: Instance | TextInstance): * {
+export function getPublicInstance(inst: Instance | TextInstance): $FlowFixMe {
   switch (inst.tag) {
     case 'INSTANCE':
       const createNodeMock = inst.rootContainerInstance.createNodeMock;
-      return createNodeMock({
+      const mockNode = createNodeMock({
         type: inst.type,
         props: inst.props,
       });
+      if (typeof mockNode === 'object' && mockNode !== null) {
+        nodeToInstanceMap.set(mockNode, inst);
+      }
+      return mockNode;
     default:
       return inst;
   }
@@ -71,13 +80,14 @@ export function appendChild(
   child: Instance | TextInstance,
 ): void {
   if (__DEV__) {
-    warning(
-      Array.isArray(parentInstance.children),
-      'An invalid container has been provided. ' +
-        'This may indicate that another renderer is being used in addition to the test renderer. ' +
-        '(For example, ReactDOM.createPortal inside of a ReactTestRenderer tree.) ' +
-        'This is not supported.',
-    );
+    if (!isArray(parentInstance.children)) {
+      console.error(
+        'An invalid container has been provided. ' +
+          'This may indicate that another renderer is being used in addition to the test renderer. ' +
+          '(For example, ReactDOM.createPortal inside of a ReactTestRenderer tree.) ' +
+          'This is not supported.',
+      );
+    }
   }
   const index = parentInstance.children.indexOf(child);
   if (index !== -1) {
@@ -107,6 +117,10 @@ export function removeChild(
   parentInstance.children.splice(index, 1);
 }
 
+export function clearContainer(container: Container): void {
+  container.children.splice(0);
+}
+
 export function getRootHostContext(
   rootContainerInstance: Container,
 ): HostContext {
@@ -116,13 +130,13 @@ export function getRootHostContext(
 export function getChildHostContext(
   parentHostContext: HostContext,
   type: string,
-  rootContainerInstance: Container,
 ): HostContext {
   return NO_CONTEXT;
 }
 
-export function prepareForCommit(containerInfo: Container): void {
+export function prepareForCommit(containerInfo: Container): null | Object {
   // noop
+  return null;
 }
 
 export function resetAfterCommit(containerInfo: Container): void {
@@ -141,6 +155,7 @@ export function createInstance(
     props,
     isHidden: false,
     children: [],
+    internalInstanceHandle,
     rootContainerInstance,
     tag: 'INSTANCE',
   };
@@ -174,15 +189,11 @@ export function prepareUpdate(
   newProps: Props,
   rootContainerInstance: Container,
   hostContext: Object,
-): null | {} {
+): null | {...} {
   return UPDATE_SIGNAL;
 }
 
 export function shouldSetTextContent(type: string, props: Props): boolean {
-  return false;
-}
-
-export function shouldDeprioritizeSubtree(type: string, props: Props): boolean {
   return false;
 }
 
@@ -199,19 +210,17 @@ export function createTextInstance(
   };
 }
 
+export function getCurrentEventPriority(): * {
+  return DefaultEventPriority;
+}
+
 export const isPrimaryRenderer = false;
-// This approach enables `now` to be mocked by tests,
-// Even after the reconciler has initialized and read host config values.
-export const now = () => TestRendererSchedulingNowImplementation();
-export const scheduleDeferredCallback = TestRendererSchedulingScheduleDeferredCallback;
-export const cancelDeferredCallback = TestRendererSchedulingCancelDeferredCallback;
-export const shouldYield = TestRendererSchedulingShouldYield;
+export const warnsIfNotActing = true;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
+
 export const noTimeout = -1;
-export const schedulePassiveEffects = scheduleDeferredCallback;
-export const cancelPassiveEffects = cancelDeferredCallback;
 
 // -------------------
 //     Mutation
@@ -221,7 +230,7 @@ export const supportsMutation = true;
 
 export function commitUpdate(
   instance: Instance,
-  updatePayload: {},
+  updatePayload: {...},
   type: string,
   oldProps: Props,
   newProps: Props,
@@ -273,4 +282,52 @@ export function unhideTextInstance(
   text: string,
 ): void {
   textInstance.isHidden = false;
+}
+
+export function getInstanceFromNode(mockNode: Object): Object | null {
+  const instance = nodeToInstanceMap.get(mockNode);
+  if (instance !== undefined) {
+    return instance.internalInstanceHandle;
+  }
+  return null;
+}
+
+export function beforeActiveInstanceBlur(internalInstanceHandle: Object) {
+  // noop
+}
+
+export function afterActiveInstanceBlur() {
+  // noop
+}
+
+export function preparePortalMount(portalInstance: Instance): void {
+  // noop
+}
+
+export function prepareScopeUpdate(scopeInstance: Object, inst: Object): void {
+  nodeToInstanceMap.set(scopeInstance, inst);
+}
+
+export function getInstanceFromScope(scopeInstance: Object): null | Object {
+  return nodeToInstanceMap.get(scopeInstance) || null;
+}
+
+export function detachDeletedInstance(node: Instance): void {
+  // noop
+}
+
+export function logRecoverableError(error: mixed): void {
+  // noop
+}
+
+export function requestPostPaintCallback(callback: (time: number) => void) {
+  // noop
+}
+
+export function prepareRendererToRender(container: Container): void {
+  // noop
+}
+
+export function resetRendererAfterRender(): void {
+  // noop
 }

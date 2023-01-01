@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,8 +8,11 @@
  */
 
 // Modules provided by RN:
-import deepDiffer from 'deepDiffer';
-import flattenStyle from 'flattenStyle';
+import {
+  deepDiffer,
+  flattenStyle,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
+import isArray from 'shared/isArray';
 
 import type {AttributeConfiguration} from './ReactNativeTypes';
 
@@ -30,22 +33,26 @@ type NestedNode = Array<NestedNode> | Object;
 let removedKeys = null;
 let removedKeyCount = 0;
 
+const deepDifferOptions = {
+  unsafelyIgnoreFunctions: true,
+};
+
 function defaultDiffer(prevProp: mixed, nextProp: mixed): boolean {
   if (typeof nextProp !== 'object' || nextProp === null) {
     // Scalars have already been checked for equality
     return true;
   } else {
     // For objects and arrays, the default diffing algorithm is a deep compare
-    return deepDiffer(prevProp, nextProp);
+    return deepDiffer(prevProp, nextProp, deepDifferOptions);
   }
 }
 
 function restoreDeletedValuesInNestedArray(
   updatePayload: Object,
   node: NestedNode,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ) {
-  if (Array.isArray(node)) {
+  if (isArray(node)) {
     let i = node.length;
     while (i-- && removedKeyCount > 0) {
       restoreDeletedValuesInNestedArray(
@@ -57,6 +64,7 @@ function restoreDeletedValuesInNestedArray(
   } else if (node && removedKeyCount > 0) {
     const obj = node;
     for (const propKey in removedKeys) {
+      // $FlowFixMe[incompatible-use] found when upgrading Flow
       if (!removedKeys[propKey]) {
         continue;
       }
@@ -71,9 +79,11 @@ function restoreDeletedValuesInNestedArray(
       }
 
       if (typeof nextProp === 'function') {
+        // $FlowFixMe[incompatible-type] found when upgrading Flow
         nextProp = true;
       }
       if (typeof nextProp === 'undefined') {
+        // $FlowFixMe[incompatible-type] found when upgrading Flow
         nextProp = null;
       }
 
@@ -91,6 +101,7 @@ function restoreDeletedValuesInNestedArray(
             : nextProp;
         updatePayload[propKey] = nextValue;
       }
+      // $FlowFixMe[incompatible-use] found when upgrading Flow
       removedKeys[propKey] = false;
       removedKeyCount--;
     }
@@ -101,7 +112,7 @@ function diffNestedArrayProperty(
   updatePayload: null | Object,
   prevArray: Array<NestedNode>,
   nextArray: Array<NestedNode>,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   const minLength =
     prevArray.length < nextArray.length ? prevArray.length : nextArray.length;
@@ -139,7 +150,7 @@ function diffNestedProperty(
   updatePayload: null | Object,
   prevProp: NestedNode,
   nextProp: NestedNode,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   if (!updatePayload && prevProp === nextProp) {
     // If no properties have been added, then we can bail out quickly on object
@@ -157,12 +168,12 @@ function diffNestedProperty(
     return updatePayload;
   }
 
-  if (!Array.isArray(prevProp) && !Array.isArray(nextProp)) {
+  if (!isArray(prevProp) && !isArray(nextProp)) {
     // Both are leaves, we can diff the leaves.
     return diffProperties(updatePayload, prevProp, nextProp, validAttributes);
   }
 
-  if (Array.isArray(prevProp) && Array.isArray(nextProp)) {
+  if (isArray(prevProp) && isArray(nextProp)) {
     // Both are arrays, we can diff the arrays.
     return diffNestedArrayProperty(
       updatePayload,
@@ -172,7 +183,7 @@ function diffNestedProperty(
     );
   }
 
-  if (Array.isArray(prevProp)) {
+  if (isArray(prevProp)) {
     return diffProperties(
       updatePayload,
       // $FlowFixMe - We know that this is always an object when the input is.
@@ -200,13 +211,13 @@ function diffNestedProperty(
 function addNestedProperty(
   updatePayload: null | Object,
   nextProp: NestedNode,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ) {
   if (!nextProp) {
     return updatePayload;
   }
 
-  if (!Array.isArray(nextProp)) {
+  if (!isArray(nextProp)) {
     // Add each property of the leaf.
     return addProperties(updatePayload, nextProp, validAttributes);
   }
@@ -230,13 +241,13 @@ function addNestedProperty(
 function clearNestedProperty(
   updatePayload: null | Object,
   prevProp: NestedNode,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   if (!prevProp) {
     return updatePayload;
   }
 
-  if (!Array.isArray(prevProp)) {
+  if (!isArray(prevProp)) {
     // Add each property of the leaf.
     return clearProperties(updatePayload, prevProp, validAttributes);
   }
@@ -262,7 +273,7 @@ function diffProperties(
   updatePayload: null | Object,
   prevProps: Object,
   nextProps: Object,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   let attributeConfig;
   let nextProp;
@@ -349,7 +360,8 @@ function diffProperties(
       if (shouldUpdate) {
         const nextValue =
           typeof attributeConfig.process === 'function'
-            ? attributeConfig.process(nextProp)
+            ? // $FlowFixMe[incompatible-use] found when upgrading Flow
+              attributeConfig.process(nextProp)
             : nextProp;
         (updatePayload || (updatePayload = {}))[propKey] = nextValue;
       }
@@ -363,13 +375,13 @@ function diffProperties(
         updatePayload,
         prevProp,
         nextProp,
-        ((attributeConfig: any): AttributeConfiguration<>),
+        ((attributeConfig: any): AttributeConfiguration),
       );
       if (removedKeyCount > 0 && updatePayload) {
         restoreDeletedValuesInNestedArray(
           updatePayload,
           nextProp,
-          ((attributeConfig: any): AttributeConfiguration<>),
+          ((attributeConfig: any): AttributeConfiguration),
         );
         removedKeys = null;
       }
@@ -420,7 +432,7 @@ function diffProperties(
       updatePayload = clearNestedProperty(
         updatePayload,
         prevProp,
-        ((attributeConfig: any): AttributeConfiguration<>),
+        ((attributeConfig: any): AttributeConfiguration),
       );
     }
   }
@@ -433,7 +445,7 @@ function diffProperties(
 function addProperties(
   updatePayload: null | Object,
   props: Object,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   // TODO: Fast path
   return diffProperties(updatePayload, emptyObject, props, validAttributes);
@@ -446,7 +458,7 @@ function addProperties(
 function clearProperties(
   updatePayload: null | Object,
   prevProps: Object,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   // TODO: Fast path
   return diffProperties(updatePayload, prevProps, emptyObject, validAttributes);
@@ -454,7 +466,7 @@ function clearProperties(
 
 export function create(
   props: Object,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   return addProperties(
     null, // updatePayload
@@ -466,7 +478,7 @@ export function create(
 export function diff(
   prevProps: Object,
   nextProps: Object,
-  validAttributes: AttributeConfiguration<>,
+  validAttributes: AttributeConfiguration,
 ): null | Object {
   return diffProperties(
     null, // updatePayload

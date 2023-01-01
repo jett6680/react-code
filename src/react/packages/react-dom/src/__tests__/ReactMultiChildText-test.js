@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -44,7 +44,7 @@ const expectChildren = function(container, children) {
     } else {
       expect(textNode != null).toBe(true);
       expect(textNode.nodeType).toBe(3);
-      expect(textNode.data).toBe('' + children);
+      expect(textNode.data).toBe(String(children));
     }
   } else {
     let mountIndex = 0;
@@ -53,9 +53,12 @@ const expectChildren = function(container, children) {
       const child = children[i];
 
       if (typeof child === 'string') {
+        if (child === '') {
+          continue;
+        }
         textNode = outerNode.childNodes[mountIndex];
         expect(textNode.nodeType).toBe(3);
-        expect(textNode.data).toBe('' + child);
+        expect(textNode.data).toBe(child);
         mountIndex++;
       } else {
         const elementDOMNode = outerNode.childNodes[mountIndex];
@@ -83,7 +86,7 @@ describe('ReactMultiChildText', () => {
         true, [],
         0, '0',
         1.2, '1.2',
-        '', '',
+        '', [],
         'foo', 'foo',
 
         [], [],
@@ -93,7 +96,7 @@ describe('ReactMultiChildText', () => {
         [true], [],
         [0], ['0'],
         [1.2], ['1.2'],
-        [''], [''],
+        [''], [],
         ['foo'], ['foo'],
         [<div />], [<div />],
 
@@ -161,7 +164,7 @@ describe('ReactMultiChildText', () => {
         [true, <div>{1.2}{''}{<div />}{'foo'}</div>, true, 1.2], [<div />, '1.2'],
         ['', 'foo', <div>{true}{<div />}{1.2}{''}</div>, 'foo'], ['', 'foo', <div />, 'foo'],
       ]);
-    }).toWarnDev([
+    }).toErrorDev([
       'Warning: Each child in a list should have a unique "key" prop.',
       'Warning: Each child in a list should have a unique "key" prop.',
     ]);

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -67,17 +67,18 @@ describe('ReactIdentity', () => {
 
   function renderAComponentWithKeyIntoContainer(key, container) {
     class Wrapper extends React.Component {
+      spanRef = React.createRef();
       render() {
         return (
           <div>
-            <span ref="span" key={key} />
+            <span ref={this.spanRef} key={key} />
           </div>
         );
       }
     }
 
     const instance = ReactDOM.render(<Wrapper />, container);
-    const span = instance.refs.span;
+    const span = instance.spanRef.current;
     expect(span).not.toBe(null);
   }
 
@@ -261,5 +262,34 @@ describe('ReactIdentity', () => {
     expect(function() {
       ReactTestUtils.renderIntoDocument(component);
     }).not.toThrow();
+  });
+
+  it('should throw if key is a Temporal-like object', () => {
+    class TemporalLike {
+      valueOf() {
+        // Throwing here is the behavior of ECMAScript "Temporal" date/time API.
+        // See https://tc39.es/proposal-temporal/docs/plaindate.html#valueOf
+        throw new TypeError('prod message');
+      }
+      toString() {
+        return '2020-01-01';
+      }
+    }
+
+    const el = document.createElement('div');
+    const test = () =>
+      ReactDOM.render(
+        <div>
+          <span key={new TemporalLike()} />
+        </div>,
+        el,
+      );
+    expect(() =>
+      expect(test).toThrowError(new TypeError('prod message')),
+    ).toErrorDev(
+      'The provided key is an unsupported type TemporalLike.' +
+        ' This value must be coerced to a string before before using it here.',
+      {withoutStack: true},
+    );
   });
 });

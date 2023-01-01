@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,15 +7,15 @@
  * @flow
  */
 
-import type {ReactNativeBaseComponentViewConfig} from './ReactNativeTypes';
-
-import invariant from 'shared/invariant';
+import type {TouchedViewDataAtPoint} from './ReactNativeTypes';
 
 // Modules provided by RN:
-import UIManager from 'UIManager';
-import deepFreezeAndThrowOnMutationInDev from 'deepFreezeAndThrowOnMutationInDev';
+import {
+  ReactNativeViewConfigRegistry,
+  UIManager,
+  deepFreezeAndThrowOnMutationInDev,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
 
-import {get as getViewConfigForType} from 'ReactNativeViewConfigRegistry';
 import {create, diff} from './ReactNativeAttributePayload';
 import {
   precacheFiberNode,
@@ -23,32 +23,37 @@ import {
   updateFiberProps,
 } from './ReactNativeComponentTree';
 import ReactNativeFiberHostComponent from './ReactNativeFiberHostComponent';
-import {
-  now as ReactNativeFrameSchedulingNow,
-  cancelDeferredCallback as ReactNativeFrameSchedulingCancelDeferredCallback,
-  scheduleDeferredCallback as ReactNativeFrameSchedulingScheduleDeferredCallback,
-  shouldYield as ReactNativeFrameSchedulingShouldYield,
-} from './ReactNativeFrameScheduling';
+
+import {DefaultEventPriority} from 'react-reconciler/src/ReactEventPriorities';
+
+const {get: getViewConfigForType} = ReactNativeViewConfigRegistry;
 
 export type Type = string;
 export type Props = Object;
 export type Container = number;
-export type Instance = {
-  _children: Array<Instance | number>,
-  _nativeTag: number,
-  viewConfig: ReactNativeBaseComponentViewConfig<>,
-};
+export type Instance = ReactNativeFiberHostComponent;
 export type TextInstance = number;
 export type HydratableInstance = Instance | TextInstance;
 export type PublicInstance = Instance;
-export type HostContext = $ReadOnly<{|
+export type HostContext = $ReadOnly<{
   isInAParentText: boolean,
-|}>;
+}>;
 export type UpdatePayload = Object; // Unused
 export type ChildSet = void; // Unused
 
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
+
+export type RendererInspectionConfig = $ReadOnly<{
+  // Deprecated. Replaced with getInspectorDataForViewAtPoint.
+  getInspectorDataForViewTag?: (tag: number) => Object,
+  getInspectorDataForViewAtPoint?: (
+    inspectedView: Object,
+    locationX: number,
+    locationY: number,
+    callback: (viewData: TouchedViewDataAtPoint) => mixed,
+  ) => void,
+}>;
 
 const UPDATE_SIGNAL = {};
 if (__DEV__) {
@@ -79,8 +84,13 @@ function recursivelyUncacheFiberNode(node: Instance | TextInstance) {
   }
 }
 
-export * from 'shared/HostConfigWithNoPersistence';
-export * from 'shared/HostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMicrotasks';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoResources';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoSingletons';
 
 export function appendInitialChild(
   parentInstance: Instance,
@@ -107,11 +117,6 @@ export function createInstance(
     }
   }
 
-  invariant(
-    type !== 'RCTView' || !hostContext.isInAParentText,
-    'Nesting of <View> within <Text> is not currently supported.',
-  );
-
   const updatePayload = create(props, viewConfig.validAttributes);
 
   UIManager.createView(
@@ -121,7 +126,11 @@ export function createInstance(
     updatePayload, // props
   );
 
-  const component = new ReactNativeFiberHostComponent(tag, viewConfig);
+  const component = new ReactNativeFiberHostComponent(
+    tag,
+    viewConfig,
+    internalInstanceHandle,
+  );
 
   precacheFiberNode(internalInstanceHandle, tag);
   updateFiberProps(tag, props);
@@ -137,10 +146,9 @@ export function createTextInstance(
   hostContext: HostContext,
   internalInstanceHandle: Object,
 ): TextInstance {
-  invariant(
-    hostContext.isInAParentText,
-    'Text strings must be rendered within a <Text> component.',
-  );
+  if (!hostContext.isInAParentText) {
+    throw new Error('Text strings must be rendered within a <Text> component.');
+  }
 
   const tag = allocateTag();
 
@@ -160,7 +168,6 @@ export function finalizeInitialChildren(
   parentInstance: Instance,
   type: string,
   props: Props,
-  rootContainerInstance: Container,
   hostContext: HostContext,
 ): boolean {
   // Don't send a no-op message over the bridge.
@@ -170,11 +177,10 @@ export function finalizeInitialChildren(
 
   // Map from child objects to native tags.
   // Either way we need to pass a copy of the Array to prevent it from being frozen.
-  const nativeTags = parentInstance._children.map(
-    child =>
-      typeof child === 'number'
-        ? child // Leaf node (eg text)
-        : child._nativeTag,
+  const nativeTags = parentInstance._children.map(child =>
+    typeof child === 'number'
+      ? child // Leaf node (eg text)
+      : child._nativeTag,
   );
 
   UIManager.setChildren(
@@ -194,7 +200,6 @@ export function getRootHostContext(
 export function getChildHostContext(
   parentHostContext: HostContext,
   type: string,
-  rootContainerInstance: Container,
 ): HostContext {
   const prevIsInAParentText = parentHostContext.isInAParentText;
   const isInAParentText =
@@ -215,8 +220,9 @@ export function getPublicInstance(instance: Instance): * {
   return instance;
 }
 
-export function prepareForCommit(containerInfo: Container): void {
+export function prepareForCommit(containerInfo: Container): null | Object {
   // Noop
+  return null;
 }
 
 export function prepareUpdate(
@@ -224,7 +230,6 @@ export function prepareUpdate(
   type: string,
   oldProps: Props,
   newProps: Props,
-  rootContainerInstance: Container,
   hostContext: HostContext,
 ): null | Object {
   return UPDATE_SIGNAL;
@@ -234,21 +239,12 @@ export function resetAfterCommit(containerInfo: Container): void {
   // Noop
 }
 
-export const now = ReactNativeFrameSchedulingNow;
 export const isPrimaryRenderer = true;
-export const scheduleDeferredCallback = ReactNativeFrameSchedulingScheduleDeferredCallback;
-export const cancelDeferredCallback = ReactNativeFrameSchedulingCancelDeferredCallback;
-export const shouldYield = ReactNativeFrameSchedulingShouldYield;
+export const warnsIfNotActing = true;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
-export const schedulePassiveEffects = scheduleDeferredCallback;
-export const cancelPassiveEffects = cancelDeferredCallback;
-
-export function shouldDeprioritizeSubtree(type: string, props: Props): boolean {
-  return false;
-}
 
 export function shouldSetTextContent(type: string, props: Props): boolean {
   // TODO (bvaughn) Revisit this decision.
@@ -258,6 +254,10 @@ export function shouldSetTextContent(type: string, props: Props): boolean {
   // It's not clear to me which is better so I'm deferring for now.
   // More context @ github.com/facebook/react/pull/8560#discussion_r92111303
   return false;
+}
+
+export function getCurrentEventPriority(): * {
+  return DefaultEventPriority;
 }
 
 // -------------------
@@ -406,10 +406,9 @@ export function insertInContainerBefore(
   // We create a wrapper object for the container in ReactNative render()
   // Or we refactor to remove wrapper objects entirely.
   // For more info on pros/cons see PR #8560 description.
-  invariant(
-    typeof parentInstance !== 'number',
-    'Container does not support insertBefore operation',
-  );
+  if (typeof parentInstance === 'number') {
+    throw new Error('Container does not support insertBefore operation');
+  }
 }
 
 export function removeChild(
@@ -482,9 +481,46 @@ export function unhideInstance(instance: Instance, props: Props): void {
   );
 }
 
+export function clearContainer(container: Container): void {
+  // TODO Implement this for React Native
+  // UIManager does not expose a "remove all" type method.
+}
+
 export function unhideTextInstance(
   textInstance: TextInstance,
   text: string,
 ): void {
   throw new Error('Not yet implemented.');
+}
+
+export function getInstanceFromNode(node: any): empty {
+  throw new Error('Not yet implemented.');
+}
+
+export function beforeActiveInstanceBlur(internalInstanceHandle: Object) {
+  // noop
+}
+
+export function afterActiveInstanceBlur() {
+  // noop
+}
+
+export function preparePortalMount(portalInstance: Instance): void {
+  // noop
+}
+
+export function detachDeletedInstance(node: Instance): void {
+  // noop
+}
+
+export function requestPostPaintCallback(callback: (time: number) => void) {
+  // noop
+}
+
+export function prepareRendererToRender(container: Container): void {
+  // noop
+}
+
+export function resetRendererAfterRender(): void {
+  // noop
 }

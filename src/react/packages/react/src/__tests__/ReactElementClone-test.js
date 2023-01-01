@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -82,8 +82,10 @@ describe('ReactElementClone', () => {
 
   it('should keep the original ref if it is not overridden', () => {
     class Grandparent extends React.Component {
+      yoloRef = React.createRef();
+
       render() {
-        return <Parent child={<div ref="yolo" />} />;
+        return <Parent child={<div ref={this.yoloRef} />} />;
       }
     }
 
@@ -96,7 +98,7 @@ describe('ReactElementClone', () => {
     }
 
     const component = ReactTestUtils.renderIntoDocument(<Grandparent />);
-    expect(component.refs.yolo.tagName).toBe('DIV');
+    expect(component.yoloRef.current.tagName).toBe('DIV');
   });
 
   it('should transfer the key property', () => {
@@ -174,21 +176,25 @@ describe('ReactElementClone', () => {
 
   it('should support keys and refs', () => {
     class Parent extends React.Component {
+      xyzRef = React.createRef();
+
       render() {
         const clone = React.cloneElement(this.props.children, {
           key: 'xyz',
-          ref: 'xyz',
+          ref: this.xyzRef,
         });
         expect(clone.key).toBe('xyz');
-        expect(clone.ref).toBe('xyz');
+        expect(clone.ref).toBe(this.xyzRef);
         return <div>{clone}</div>;
       }
     }
 
     class Grandparent extends React.Component {
+      parentRef = React.createRef();
+
       render() {
         return (
-          <Parent ref="parent">
+          <Parent ref={this.parentRef}>
             <span key="abc" />
           </Parent>
         );
@@ -196,30 +202,37 @@ describe('ReactElementClone', () => {
     }
 
     const component = ReactTestUtils.renderIntoDocument(<Grandparent />);
-    expect(component.refs.parent.refs.xyz.tagName).toBe('SPAN');
+    expect(component.parentRef.current.xyzRef.current.tagName).toBe('SPAN');
   });
 
   it('should steal the ref if a new ref is specified', () => {
     class Parent extends React.Component {
+      xyzRef = React.createRef();
+
       render() {
-        const clone = React.cloneElement(this.props.children, {ref: 'xyz'});
+        const clone = React.cloneElement(this.props.children, {
+          ref: this.xyzRef,
+        });
         return <div>{clone}</div>;
       }
     }
 
     class Grandparent extends React.Component {
+      parentRef = React.createRef();
+      childRef = React.createRef();
+
       render() {
         return (
-          <Parent ref="parent">
-            <span ref="child" />
+          <Parent ref={this.parentRef}>
+            <span ref={this.childRef} />
           </Parent>
         );
       }
     }
 
     const component = ReactTestUtils.renderIntoDocument(<Grandparent />);
-    expect(component.refs.child).toBeUndefined();
-    expect(component.refs.parent.refs.xyz.tagName).toBe('SPAN');
+    expect(component.childRef).toEqual({current: null});
+    expect(component.parentRef.current.xyzRef.current.tagName).toBe('SPAN');
   });
 
   it('should overwrite props', () => {
@@ -259,7 +272,7 @@ describe('ReactElementClone', () => {
   it('warns for keys for arrays of elements in rest args', () => {
     expect(() =>
       React.cloneElement(<div />, null, [<div />, <div />]),
-    ).toWarnDev('Each child in a list should have a unique "key" prop.');
+    ).toErrorDev('Each child in a list should have a unique "key" prop.');
   });
 
   it('does not warns for arrays of elements with keys', () => {
@@ -297,12 +310,12 @@ describe('ReactElementClone', () => {
     }
     expect(() =>
       ReactTestUtils.renderIntoDocument(React.createElement(GrandParent)),
-    ).toWarnDev(
+    ).toErrorDev(
       'Warning: Failed prop type: ' +
         'Invalid prop `color` of type `number` supplied to `Component`, ' +
         'expected `string`.\n' +
-        '    in Component (created by GrandParent)\n' +
-        '    in Parent (created by GrandParent)\n' +
+        '    in Component (at **)\n' +
+        '    in Parent (at **)\n' +
         '    in GrandParent',
     );
   });
@@ -315,7 +328,7 @@ describe('ReactElementClone', () => {
   });
 
   it('should ignore undefined key and ref', () => {
-    const element = React.createFactory(ComponentClass)({
+    const element = React.createElement(ComponentClass, {
       key: '12',
       ref: '34',
       foo: '56',
@@ -337,7 +350,7 @@ describe('ReactElementClone', () => {
   });
 
   it('should extract null key and ref', () => {
-    const element = React.createFactory(ComponentClass)({
+    const element = React.createElement(ComponentClass, {
       key: '12',
       ref: '34',
       foo: '56',

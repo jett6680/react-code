@@ -1,5 +1,5 @@
 /*!
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,6 +11,8 @@
  * Full type definitions are not yet officially supported. These are mostly
  * just helpers for the unit test.
  */
+
+declare let global: any;
 
 declare module 'react' {
   export class Component {
@@ -24,4 +26,5 @@ declare module 'react' {
   }
   export let PropTypes : any;
   export function createElement(tag : any, props ?: any, ...children : any[]) : any
+  export function createRef(): any;
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -111,25 +111,5 @@ describe('SyntheticWheelEvent', () => {
     );
 
     expect(events.length).toBe(2);
-  });
-
-  it('should be able to `persist`', () => {
-    const events = [];
-    const onWheel = event => {
-      expect(event.isPersistent()).toBe(false);
-      event.persist();
-      expect(event.isPersistent()).toBe(true);
-      events.push(event);
-    };
-    ReactDOM.render(<div onWheel={onWheel} />, container);
-
-    container.firstChild.dispatchEvent(
-      new MouseEvent('wheel', {
-        bubbles: true,
-      }),
-    );
-
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe('wheel');
   });
 });

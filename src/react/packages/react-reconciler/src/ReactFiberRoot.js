@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,179 +7,198 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
-import type {ExpirationTime} from './ReactFiberExpirationTime';
-import type {TimeoutHandle, NoTimeout} from './ReactFiberHostConfig';
-import type {Thenable} from './ReactFiberScheduler';
-import type {Interaction} from 'scheduler/src/Tracing';
+import type {ReactNodeList} from 'shared/ReactTypes';
+import type {
+  FiberRoot,
+  SuspenseHydrationCallbacks,
+  TransitionTracingCallbacks,
+} from './ReactInternalTypes';
+import type {RootTag} from './ReactRootTags';
+import type {Cache} from './ReactFiberCacheComponent';
+import type {Container} from './ReactFiberHostConfig';
 
-import {noTimeout} from './ReactFiberHostConfig';
+import {noTimeout, supportsHydration} from './ReactFiberHostConfig';
 import {createHostRootFiber} from './ReactFiber';
-import {NoWork} from './ReactFiberExpirationTime';
-import {enableSchedulerTracing} from 'shared/ReactFeatureFlags';
-import {unstable_getThreadID} from 'scheduler/tracing';
+import {
+  NoLane,
+  NoLanes,
+  NoTimestamp,
+  TotalLanes,
+  createLaneMap,
+} from './ReactFiberLane';
+import {
+  enableSuspenseCallback,
+  enableCache,
+  enableProfilerCommitHooks,
+  enableProfilerTimer,
+  enableUpdaterTracking,
+  enableTransitionTracing,
+} from 'shared/ReactFeatureFlags';
+import {initializeUpdateQueue} from './ReactFiberClassUpdateQueue';
+import {LegacyRoot, ConcurrentRoot} from './ReactRootTags';
+import {createCache, retainCache} from './ReactFiberCacheComponent';
 
-// TODO: This should be lifted into the renderer.
-export type Batch = {
-  _defer: boolean,
-  _expirationTime: ExpirationTime,
-  _onComplete: () => mixed,
-  _next: Batch | null,
+export type RootState = {
+  element: any,
+  isDehydrated: boolean,
+  cache: Cache,
 };
 
-export type PendingInteractionMap = Map<ExpirationTime, Set<Interaction>>;
+function FiberRootNode(
+  containerInfo,
+  tag,
+  hydrate,
+  identifierPrefix,
+  onRecoverableError,
+) {
+  this.tag = tag;
+  this.containerInfo = containerInfo;
+  this.pendingChildren = null;
+  this.current = null;
+  this.pingCache = null;
+  this.finishedWork = null;
+  this.timeoutHandle = noTimeout;
+  this.context = null;
+  this.pendingContext = null;
+  this.callbackNode = null;
+  this.callbackPriority = NoLane;
+  this.eventTimes = createLaneMap(NoLanes);
+  this.expirationTimes = createLaneMap(NoTimestamp);
 
-type BaseFiberRootProperties = {|
-  // Any additional information from the host associated with this root.
-  containerInfo: any,
-  // Used only by persistent updates.
-  pendingChildren: any,
-  // The currently active root fiber. This is the mutable root of the tree.
-  current: Fiber,
+  this.pendingLanes = NoLanes;
+  this.suspendedLanes = NoLanes;
+  this.pingedLanes = NoLanes;
+  this.expiredLanes = NoLanes;
+  this.mutableReadLanes = NoLanes;
+  this.finishedLanes = NoLanes;
+  this.errorRecoveryDisabledLanes = NoLanes;
 
-  // The following priority levels are used to distinguish between 1)
-  // uncommitted work, 2) uncommitted work that is suspended, and 3) uncommitted
-  // work that may be unsuspended. We choose not to track each individual
-  // pending level, trading granularity for performance.
-  //
-  // The earliest and latest priority levels that are suspended from committing.
-  earliestSuspendedTime: ExpirationTime,
-  latestSuspendedTime: ExpirationTime,
-  // The earliest and latest priority levels that are not known to be suspended.
-  earliestPendingTime: ExpirationTime,
-  latestPendingTime: ExpirationTime,
-  // The latest priority level that was pinged by a resolved promise and can
-  // be retried.
-  latestPingedTime: ExpirationTime,
+  this.entangledLanes = NoLanes;
+  this.entanglements = createLaneMap(NoLanes);
 
-  pingCache:
-    | WeakMap<Thenable, Set<ExpirationTime>>
-    | Map<Thenable, Set<ExpirationTime>>
-    | null,
+  this.hiddenUpdates = createLaneMap(null);
 
-  // If an error is thrown, and there are no more updates in the queue, we try
-  // rendering from the root one more time, synchronously, before handling
-  // the error.
-  didError: boolean,
+  this.identifierPrefix = identifierPrefix;
+  this.onRecoverableError = onRecoverableError;
 
-  pendingCommitExpirationTime: ExpirationTime,
-  // A finished work-in-progress HostRoot that's ready to be committed.
-  finishedWork: Fiber | null,
-  // Timeout handle returned by setTimeout. Used to cancel a pending timeout, if
-  // it's superseded by a new one.
-  timeoutHandle: TimeoutHandle | NoTimeout,
-  // Top context object, used by renderSubtreeIntoContainer
-  context: Object | null,
-  pendingContext: Object | null,
-  // Determines if we should attempt to hydrate on the initial mount
-  +hydrate: boolean,
-  // Remaining expiration time on this root.
-  // TODO: Lift this into the renderer
-  nextExpirationTimeToWorkOn: ExpirationTime,
-  expirationTime: ExpirationTime,
-  // List of top-level batches. This list indicates whether a commit should be
-  // deferred. Also contains completion callbacks.
-  // TODO: Lift this into the renderer
-  firstBatch: Batch | null,
-  // Linked-list of roots
-  nextScheduledRoot: FiberRoot | null,
-|};
-
-// The following attributes are only used by interaction tracing builds.
-// They enable interactions to be associated with their async work,
-// And expose interaction metadata to the React DevTools Profiler plugin.
-// Note that these attributes are only defined when the enableSchedulerTracing flag is enabled.
-type ProfilingOnlyFiberRootProperties = {|
-  interactionThreadID: number,
-  memoizedInteractions: Set<Interaction>,
-  pendingInteractionMap: PendingInteractionMap,
-|};
-
-// Exported FiberRoot type includes all properties,
-// To avoid requiring potentially error-prone :any casts throughout the project.
-// Profiling properties are only safe to access in profiling builds (when enableSchedulerTracing is true).
-// The types are defined separately within this file to ensure they stay in sync.
-// (We don't have to use an inline :any cast when enableSchedulerTracing is disabled.)
-export type FiberRoot = {
-  ...BaseFiberRootProperties,
-  ...ProfilingOnlyFiberRootProperties,
-};
-
-export function createFiberRoot(
-  containerInfo: any,
-  isConcurrent: boolean,
-  hydrate: boolean,
-): FiberRoot {
-  // Cyclic construction. This cheats the type system right now because
-  // stateNode is any.
-  const uninitializedFiber = createHostRootFiber(isConcurrent);
-
-  let root;
-  if (enableSchedulerTracing) {
-    root = ({
-      current: uninitializedFiber,
-      containerInfo: containerInfo,
-      pendingChildren: null,
-
-      earliestPendingTime: NoWork,
-      latestPendingTime: NoWork,
-      earliestSuspendedTime: NoWork,
-      latestSuspendedTime: NoWork,
-      latestPingedTime: NoWork,
-
-      pingCache: null,
-
-      didError: false,
-
-      pendingCommitExpirationTime: NoWork,
-      finishedWork: null,
-      timeoutHandle: noTimeout,
-      context: null,
-      pendingContext: null,
-      hydrate,
-      nextExpirationTimeToWorkOn: NoWork,
-      expirationTime: NoWork,
-      firstBatch: null,
-      nextScheduledRoot: null,
-
-      interactionThreadID: unstable_getThreadID(),
-      memoizedInteractions: new Set(),
-      pendingInteractionMap: new Map(),
-    }: FiberRoot);
-  } else {
-    root = ({
-      current: uninitializedFiber,
-      containerInfo: containerInfo,
-      pendingChildren: null,
-
-      pingCache: null,
-
-      earliestPendingTime: NoWork,
-      latestPendingTime: NoWork,
-      earliestSuspendedTime: NoWork,
-      latestSuspendedTime: NoWork,
-      latestPingedTime: NoWork,
-
-      didError: false,
-
-      pendingCommitExpirationTime: NoWork,
-      finishedWork: null,
-      timeoutHandle: noTimeout,
-      context: null,
-      pendingContext: null,
-      hydrate,
-      nextExpirationTimeToWorkOn: NoWork,
-      expirationTime: NoWork,
-      firstBatch: null,
-      nextScheduledRoot: null,
-    }: BaseFiberRootProperties);
+  if (enableCache) {
+    this.pooledCache = null;
+    this.pooledCacheLanes = NoLanes;
   }
 
+  if (supportsHydration) {
+    this.mutableSourceEagerHydrationData = null;
+  }
+
+  if (enableSuspenseCallback) {
+    this.hydrationCallbacks = null;
+  }
+
+  this.incompleteTransitions = new Map();
+  if (enableTransitionTracing) {
+    this.transitionCallbacks = null;
+    const transitionLanesMap = (this.transitionLanes = []);
+    for (let i = 0; i < TotalLanes; i++) {
+      transitionLanesMap.push(null);
+    }
+  }
+
+  if (enableProfilerTimer && enableProfilerCommitHooks) {
+    this.effectDuration = 0;
+    this.passiveEffectDuration = 0;
+  }
+
+  if (enableUpdaterTracking) {
+    this.memoizedUpdaters = new Set();
+    const pendingUpdatersLaneMap = (this.pendingUpdatersLaneMap = []);
+    for (let i = 0; i < TotalLanes; i++) {
+      pendingUpdatersLaneMap.push(new Set());
+    }
+  }
+
+  if (__DEV__) {
+    switch (tag) {
+      case ConcurrentRoot:
+        this._debugRootType = hydrate ? 'hydrateRoot()' : 'createRoot()';
+        break;
+      case LegacyRoot:
+        this._debugRootType = hydrate ? 'hydrate()' : 'render()';
+        break;
+    }
+  }
+}
+
+export function createFiberRoot(
+  containerInfo: Container,
+  tag: RootTag,
+  hydrate: boolean,
+  initialChildren: ReactNodeList,
+  hydrationCallbacks: null | SuspenseHydrationCallbacks,
+  isStrictMode: boolean,
+  concurrentUpdatesByDefaultOverride: null | boolean,
+  // TODO: We have several of these arguments that are conceptually part of the
+  // host config, but because they are passed in at runtime, we have to thread
+  // them through the root constructor. Perhaps we should put them all into a
+  // single type, like a DynamicHostConfig that is defined by the renderer.
+  identifierPrefix: string,
+  onRecoverableError: null | ((error: mixed) => void),
+  transitionCallbacks: null | TransitionTracingCallbacks,
+): FiberRoot {
+  // $FlowFixMe[invalid-constructor] Flow no longer supports calling new on functions
+  const root: FiberRoot = (new FiberRootNode(
+    containerInfo,
+    tag,
+    hydrate,
+    identifierPrefix,
+    onRecoverableError,
+  ): any);
+  if (enableSuspenseCallback) {
+    root.hydrationCallbacks = hydrationCallbacks;
+  }
+
+  if (enableTransitionTracing) {
+    root.transitionCallbacks = transitionCallbacks;
+  }
+
+  // Cyclic construction. This cheats the type system right now because
+  // stateNode is any.
+  const uninitializedFiber = createHostRootFiber(
+    tag,
+    isStrictMode,
+    concurrentUpdatesByDefaultOverride,
+  );
+  root.current = uninitializedFiber;
   uninitializedFiber.stateNode = root;
 
-  // The reason for the way the Flow types are structured in this file,
-  // Is to avoid needing :any casts everywhere interaction tracing fields are used.
-  // Unfortunately that requires an :any cast for non-interaction tracing capable builds.
-  // $FlowFixMe Remove this :any cast and replace it with something better.
-  return ((root: any): FiberRoot);
+  if (enableCache) {
+    const initialCache = createCache();
+    retainCache(initialCache);
+
+    // The pooledCache is a fresh cache instance that is used temporarily
+    // for newly mounted boundaries during a render. In general, the
+    // pooledCache is always cleared from the root at the end of a render:
+    // it is either released when render commits, or moved to an Offscreen
+    // component if rendering suspends. Because the lifetime of the pooled
+    // cache is distinct from the main memoizedState.cache, it must be
+    // retained separately.
+    root.pooledCache = initialCache;
+    retainCache(initialCache);
+    const initialState: RootState = {
+      element: initialChildren,
+      isDehydrated: hydrate,
+      cache: initialCache,
+    };
+    uninitializedFiber.memoizedState = initialState;
+  } else {
+    const initialState: RootState = {
+      element: initialChildren,
+      isDehydrated: hydrate,
+      cache: (null: any), // not enabled yet
+    };
+    uninitializedFiber.memoizedState = initialState;
+  }
+
+  initializeUpdateQueue(uninitializedFiber);
+
+  return root;
 }

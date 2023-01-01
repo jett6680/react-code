@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,6 +14,7 @@ const ReactDOMServerIntegrationUtils = require('./utils/ReactDOMServerIntegratio
 let React;
 let ReactDOM;
 let ReactDOMServer;
+let ReactTestUtils;
 
 function initModules() {
   // Reset warning cache.
@@ -21,11 +22,13 @@ function initModules() {
   React = require('react');
   ReactDOM = require('react-dom');
   ReactDOMServer = require('react-dom/server');
+  ReactTestUtils = require('react-dom/test-utils');
 
   // Make them available to the helpers.
   return {
     ReactDOM,
     ReactDOMServer,
+    ReactTestUtils,
   };
 }
 
@@ -237,12 +240,12 @@ describe('ReactDOMServerIntegration', () => {
                   </Theme.Provider>
                   <LanguageConsumer>
                     {language => (
-                      <React.Fragment>
+                      <>
                         <ThemeConsumer>
                           {theme => <div id="theme3">{theme}</div>}
                         </ThemeConsumer>
                         <div id="language2">{language}</div>
-                      </React.Fragment>
+                      </>
                     )}
                   </LanguageConsumer>
                 </Theme.Provider>
@@ -254,7 +257,7 @@ describe('ReactDOMServerIntegration', () => {
           </LanguageConsumer>
         </div>
       );
-      let e = await render(<App />);
+      const e = await render(<App />);
       expect(e.querySelector('#theme1').textContent).toBe('dark');
       expect(e.querySelector('#theme2').textContent).toBe('light');
       expect(e.querySelector('#theme3').textContent).toBe('blue');

@@ -311,8 +311,8 @@ module.exports = function(webpackEnv) {
         'events/ReactGenericBatching': path.resolve(__dirname, '../src/react/packages/events/ReactGenericBatching'),
         'events/SyntheticEvent': path.resolve(__dirname, '../src/react/packages/events/SyntheticEvent'),
         'events/TopLevelEventTypes': path.resolve(__dirname, '../src/react/packages/events/TopLevelEventTypes'),
-        'scheduler': path.resolve(__dirname, '../src/react/packages/scheduler')
-
+        'scheduler': path.resolve(__dirname, '../src/react/packages/scheduler'),
+        'react-dom-bindings': path.resolve(__dirname, '../src/react/packages/react-dom-bindings')
       },
       plugins: [
         // Adds support for installing with Plug'n'Play, leading to faster installs and adding

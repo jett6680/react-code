@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,12 +7,15 @@
  * @flow
  */
 
+import type {ElementRef} from 'react';
 import type {
+  HostComponent,
   MeasureInWindowOnSuccessCallback,
   MeasureLayoutOnSuccessCallback,
   MeasureOnSuccessCallback,
-  NativeMethodsMixinType,
-  ReactNativeBaseComponentViewConfig,
+  NativeMethods,
+  ViewConfig,
+  TouchedViewDataAtPoint,
 } from './ReactNativeTypes';
 
 import {
@@ -20,34 +23,42 @@ import {
   warnForStyleProps,
 } from './NativeMethodsMixinUtils';
 import {create, diff} from './ReactNativeAttributePayload';
-import {
-  now as ReactNativeFrameSchedulingNow,
-  cancelDeferredCallback as ReactNativeFrameSchedulingCancelDeferredCallback,
-  scheduleDeferredCallback as ReactNativeFrameSchedulingScheduleDeferredCallback,
-  shouldYield as ReactNativeFrameSchedulingShouldYield,
-} from './ReactNativeFrameScheduling';
-import {get as getViewConfigForType} from 'ReactNativeViewConfigRegistry';
-
-import deepFreezeAndThrowOnMutationInDev from 'deepFreezeAndThrowOnMutationInDev';
-import invariant from 'shared/invariant';
 
 import {dispatchEvent} from './ReactFabricEventEmitter';
 
-// Modules provided by RN:
-import TextInputState from 'TextInputState';
 import {
+  DefaultEventPriority,
+  DiscreteEventPriority,
+} from 'react-reconciler/src/ReactEventPriorities';
+
+// Modules provided by RN:
+import {
+  ReactNativeViewConfigRegistry,
+  TextInputState,
+  deepFreezeAndThrowOnMutationInDev,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
+
+const {
   createNode,
   cloneNode,
   cloneNodeWithNewChildren,
   cloneNodeWithNewChildrenAndProps,
   cloneNodeWithNewProps,
-  createChildSet as createChildNodeSet,
-  appendChild as appendChildNode,
-  appendChildToSet as appendChildNodeToSet,
+  createChildSet: createChildNodeSet,
+  appendChild: appendChildNode,
+  appendChildToSet: appendChildNodeToSet,
   completeRoot,
   registerEventHandler,
-} from 'FabricUIManager';
-import UIManager from 'UIManager';
+  measure: fabricMeasure,
+  measureInWindow: fabricMeasureInWindow,
+  measureLayout: fabricMeasureLayout,
+  unstable_DefaultEventPriority: FabricDefaultPriority,
+  unstable_DiscreteEventPriority: FabricDiscretePriority,
+  unstable_getCurrentEventPriority: fabricGetCurrentEventPriority,
+  setNativeProps,
+} = nativeFabricUIManager;
+
+const {get: getViewConfigForType} = ReactNativeViewConfigRegistry;
 
 // Counter for uniquely identifying views.
 // % 10 === 1 means it is a rootTag.
@@ -61,21 +72,53 @@ export type Props = Object;
 export type Instance = {
   node: Node,
   canonical: ReactFabricHostComponent,
+  ...
 };
-export type TextInstance = {
-  node: Node,
-};
+export type TextInstance = {node: Node, ...};
 export type HydratableInstance = Instance | TextInstance;
 export type PublicInstance = ReactFabricHostComponent;
 export type Container = number;
 export type ChildSet = Object;
-export type HostContext = $ReadOnly<{|
+export type HostContext = $ReadOnly<{
   isInAParentText: boolean,
-|}>;
+}>;
 export type UpdatePayload = Object;
 
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
+
+export type RendererInspectionConfig = $ReadOnly<{
+  // Deprecated. Replaced with getInspectorDataForViewAtPoint.
+  getInspectorDataForViewTag?: (tag: number) => Object,
+  getInspectorDataForViewAtPoint?: (
+    inspectedView: Object,
+    locationX: number,
+    locationY: number,
+    callback: (viewData: TouchedViewDataAtPoint) => mixed,
+  ) => void,
+}>;
+
+// TODO?: find a better place for this type to live
+export type EventListenerOptions = $ReadOnly<{
+  capture?: boolean,
+  once?: boolean,
+  passive?: boolean,
+  signal: mixed, // not yet implemented
+}>;
+export type EventListenerRemoveOptions = $ReadOnly<{
+  capture?: boolean,
+}>;
+
+// TODO?: this will be changed in the future to be w3c-compatible and allow "EventListener" objects as well as functions.
+export type EventListener = Function;
+
+type InternalEventListeners = {
+  [string]: {
+    listener: EventListener,
+    options: EventListenerOptions,
+    invalidated: boolean,
+  }[],
+};
 
 // TODO: Remove this conditional once all changes have propagated.
 if (registerEventHandler) {
@@ -90,79 +133,205 @@ if (registerEventHandler) {
  */
 class ReactFabricHostComponent {
   _nativeTag: number;
-  viewConfig: ReactNativeBaseComponentViewConfig<>;
+  viewConfig: ViewConfig;
   currentProps: Props;
+  _internalInstanceHandle: Object;
+  _eventListeners: ?InternalEventListeners;
 
   constructor(
     tag: number,
-    viewConfig: ReactNativeBaseComponentViewConfig<>,
+    viewConfig: ViewConfig,
     props: Props,
+    internalInstanceHandle: Object,
   ) {
     this._nativeTag = tag;
     this.viewConfig = viewConfig;
     this.currentProps = props;
+    this._internalInstanceHandle = internalInstanceHandle;
   }
 
   blur() {
-    TextInputState.blurTextInput(this._nativeTag);
+    TextInputState.blurTextInput(this);
   }
 
   focus() {
-    TextInputState.focusTextInput(this._nativeTag);
+    TextInputState.focusTextInput(this);
   }
 
   measure(callback: MeasureOnSuccessCallback) {
-    UIManager.measure(
-      this._nativeTag,
-      mountSafeCallback_NOT_REALLY_SAFE(this, callback),
-    );
+    const {stateNode} = this._internalInstanceHandle;
+    if (stateNode != null) {
+      fabricMeasure(
+        stateNode.node,
+        mountSafeCallback_NOT_REALLY_SAFE(this, callback),
+      );
+    }
   }
 
   measureInWindow(callback: MeasureInWindowOnSuccessCallback) {
-    UIManager.measureInWindow(
-      this._nativeTag,
-      mountSafeCallback_NOT_REALLY_SAFE(this, callback),
-    );
+    const {stateNode} = this._internalInstanceHandle;
+    if (stateNode != null) {
+      fabricMeasureInWindow(
+        stateNode.node,
+        mountSafeCallback_NOT_REALLY_SAFE(this, callback),
+      );
+    }
   }
 
   measureLayout(
-    relativeToNativeNode: number,
+    relativeToNativeNode: number | ElementRef<HostComponent<mixed>>,
     onSuccess: MeasureLayoutOnSuccessCallback,
-    onFail: () => void /* currently unused */,
+    onFail?: () => void /* currently unused */,
   ) {
-    UIManager.measureLayout(
-      this._nativeTag,
-      relativeToNativeNode,
-      mountSafeCallback_NOT_REALLY_SAFE(this, onFail),
-      mountSafeCallback_NOT_REALLY_SAFE(this, onSuccess),
-    );
+    if (
+      typeof relativeToNativeNode === 'number' ||
+      !(relativeToNativeNode instanceof ReactFabricHostComponent)
+    ) {
+      if (__DEV__) {
+        console.error(
+          'Warning: ref.measureLayout must be called with a ref to a native component.',
+        );
+      }
+
+      return;
+    }
+
+    const toStateNode = this._internalInstanceHandle.stateNode;
+    const fromStateNode =
+      relativeToNativeNode._internalInstanceHandle.stateNode;
+
+    if (toStateNode != null && fromStateNode != null) {
+      fabricMeasureLayout(
+        toStateNode.node,
+        fromStateNode.node,
+        mountSafeCallback_NOT_REALLY_SAFE(this, onFail),
+        mountSafeCallback_NOT_REALLY_SAFE(this, onSuccess),
+      );
+    }
   }
 
   setNativeProps(nativeProps: Object) {
     if (__DEV__) {
       warnForStyleProps(nativeProps, this.viewConfig.validAttributes);
     }
-
     const updatePayload = create(nativeProps, this.viewConfig.validAttributes);
 
-    // Avoid the overhead of bridge calls if there's no update.
-    // This is an expensive no-op for Android, and causes an unnecessary
-    // view invalidation for certain components (eg RCTTextInput) on iOS.
-    if (updatePayload != null) {
-      UIManager.updateView(
-        this._nativeTag,
-        this.viewConfig.uiViewClassName,
-        updatePayload,
-      );
+    const {stateNode} = this._internalInstanceHandle;
+    if (stateNode != null && updatePayload != null) {
+      setNativeProps(stateNode.node, updatePayload);
     }
+  }
+
+  // This API (addEventListener, removeEventListener) attempts to adhere to the
+  // w3 Level2 Events spec as much as possible, treating HostComponent as a DOM node.
+  //
+  // Unless otherwise noted, these methods should "just work" and adhere to the W3 specs.
+  // If they deviate in a way that is not explicitly noted here, you've found a bug!
+  //
+  // See:
+  // * https://www.w3.org/TR/DOM-Level-2-Events/events.html
+  // * https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener
+  // * https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/removeEventListener
+  //
+  // And notably, not implemented (yet?):
+  // * https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/dispatchEvent
+  //
+  //
+  // Deviations from spec/TODOs:
+  // (1) listener must currently be a function, we do not support EventListener objects yet.
+  // (2) we do not support the `signal` option / AbortSignal yet
+  addEventListener_unstable(
+    eventType: string,
+    listener: EventListener,
+    options: EventListenerOptions | boolean,
+  ) {
+    if (typeof eventType !== 'string') {
+      throw new Error('addEventListener_unstable eventType must be a string');
+    }
+    if (typeof listener !== 'function') {
+      throw new Error('addEventListener_unstable listener must be a function');
+    }
+
+    // The third argument is either boolean indicating "captures" or an object.
+    const optionsObj =
+      typeof options === 'object' && options !== null ? options : {};
+    const capture =
+      (typeof options === 'boolean' ? options : optionsObj.capture) || false;
+    const once = optionsObj.once || false;
+    const passive = optionsObj.passive || false;
+    const signal = null; // TODO: implement signal/AbortSignal
+
+    /* $FlowFixMe the old version of Flow doesn't have a good way to define an
+     * empty exact object. */
+    const eventListeners: InternalEventListeners = this._eventListeners || {};
+    if (this._eventListeners == null) {
+      this._eventListeners = eventListeners;
+    }
+
+    const namedEventListeners = eventListeners[eventType] || [];
+    if (eventListeners[eventType] == null) {
+      eventListeners[eventType] = namedEventListeners;
+    }
+
+    namedEventListeners.push({
+      listener: listener,
+      invalidated: false,
+      options: {
+        capture: capture,
+        once: once,
+        passive: passive,
+        signal: signal,
+      },
+    });
+  }
+
+  // See https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/removeEventListener
+  removeEventListener_unstable(
+    eventType: string,
+    listener: EventListener,
+    options: EventListenerRemoveOptions | boolean,
+  ) {
+    // eventType and listener must be referentially equal to be removed from the listeners
+    // data structure, but in "options" we only check the `capture` flag, according to spec.
+    // That means if you add the same function as a listener with capture set to true and false,
+    // you must also call removeEventListener twice with capture set to true/false.
+    const optionsObj =
+      typeof options === 'object' && options !== null ? options : {};
+    const capture =
+      (typeof options === 'boolean' ? options : optionsObj.capture) || false;
+
+    // If there are no event listeners or named event listeners, we can bail early - our
+    // job is already done.
+    const eventListeners = this._eventListeners;
+    if (!eventListeners) {
+      return;
+    }
+    const namedEventListeners = eventListeners[eventType];
+    if (!namedEventListeners) {
+      return;
+    }
+
+    // TODO: optimize this path to make remove cheaper
+    eventListeners[eventType] = namedEventListeners.filter(listenerObj => {
+      return !(
+        listenerObj.listener === listener &&
+        listenerObj.options.capture === capture
+      );
+    });
   }
 }
 
-// eslint-disable-next-line no-unused-expressions
-(ReactFabricHostComponent.prototype: NativeMethodsMixinType);
+// $FlowFixMe[class-object-subtyping] found when upgrading Flow
+// $FlowFixMe[method-unbinding] found when upgrading Flow
+(ReactFabricHostComponent.prototype: $ReadOnly<{...NativeMethods, ...}>);
 
-export * from 'shared/HostConfigWithNoMutation';
-export * from 'shared/HostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMutation';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMicrotasks';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoResources';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoSingletons';
 
 export function appendInitialChild(
   parentInstance: Instance,
@@ -191,11 +360,6 @@ export function createInstance(
     }
   }
 
-  invariant(
-    type !== 'RCTView' || !hostContext.isInAParentText,
-    'Nesting of <View> within <Text> is not currently supported.',
-  );
-
   const updatePayload = create(props, viewConfig.validAttributes);
 
   const node = createNode(
@@ -206,7 +370,12 @@ export function createInstance(
     internalInstanceHandle, // internalInstanceHandle
   );
 
-  const component = new ReactFabricHostComponent(tag, viewConfig, props);
+  const component = new ReactFabricHostComponent(
+    tag,
+    viewConfig,
+    props,
+    internalInstanceHandle,
+  );
 
   return {
     node: node,
@@ -220,10 +389,11 @@ export function createTextInstance(
   hostContext: HostContext,
   internalInstanceHandle: Object,
 ): TextInstance {
-  invariant(
-    hostContext.isInAParentText,
-    'Text strings must be rendered within a <Text> component.',
-  );
+  if (__DEV__) {
+    if (!hostContext.isInAParentText) {
+      console.error('Text strings must be rendered within a <Text> component.');
+    }
+  }
 
   const tag = nextReactTag;
   nextReactTag += 2;
@@ -245,7 +415,6 @@ export function finalizeInitialChildren(
   parentInstance: Instance,
   type: string,
   props: Props,
-  rootContainerInstance: Container,
   hostContext: HostContext,
 ): boolean {
   return false;
@@ -260,7 +429,6 @@ export function getRootHostContext(
 export function getChildHostContext(
   parentHostContext: HostContext,
   type: string,
-  rootContainerInstance: Container,
 ): HostContext {
   const prevIsInAParentText = parentHostContext.isInAParentText;
   const isInAParentText =
@@ -269,6 +437,9 @@ export function getChildHostContext(
     type === 'RCTSinglelineTextInputView' || // iOS
     type === 'RCTText' ||
     type === 'RCTVirtualText';
+
+  // TODO: If this is an offscreen host container, we should reuse the
+  // parent context.
 
   if (prevIsInAParentText !== isInAParentText) {
     return {isInAParentText};
@@ -281,8 +452,9 @@ export function getPublicInstance(instance: Instance): * {
   return instance.canonical;
 }
 
-export function prepareForCommit(containerInfo: Container): void {
+export function prepareForCommit(containerInfo: Container): null | Object {
   // Noop
+  return null;
 }
 
 export function prepareUpdate(
@@ -290,7 +462,6 @@ export function prepareUpdate(
   type: string,
   oldProps: Props,
   newProps: Props,
-  rootContainerInstance: Container,
   hostContext: HostContext,
 ): null | Object {
   const viewConfig = instance.canonical.viewConfig;
@@ -306,10 +477,6 @@ export function resetAfterCommit(containerInfo: Container): void {
   // Noop
 }
 
-export function shouldDeprioritizeSubtree(type: string, props: Props): boolean {
-  return false;
-}
-
 export function shouldSetTextContent(type: string, props: Props): boolean {
   // TODO (bvaughn) Revisit this decision.
   // Always returning false simplifies the createInstance() implementation,
@@ -320,18 +487,33 @@ export function shouldSetTextContent(type: string, props: Props): boolean {
   return false;
 }
 
+export function getCurrentEventPriority(): * {
+  const currentEventPriority = fabricGetCurrentEventPriority
+    ? fabricGetCurrentEventPriority()
+    : null;
+
+  if (currentEventPriority != null) {
+    switch (currentEventPriority) {
+      case FabricDiscretePriority:
+        return DiscreteEventPriority;
+      case FabricDefaultPriority:
+      default:
+        return DefaultEventPriority;
+    }
+  }
+
+  return DefaultEventPriority;
+}
+
 // The Fabric renderer is secondary to the existing React Native renderer.
 export const isPrimaryRenderer = false;
-export const now = ReactNativeFrameSchedulingNow;
-export const scheduleDeferredCallback = ReactNativeFrameSchedulingScheduleDeferredCallback;
-export const cancelDeferredCallback = ReactNativeFrameSchedulingCancelDeferredCallback;
-export const shouldYield = ReactNativeFrameSchedulingShouldYield;
+
+// The Fabric renderer shouldn't trigger missing act() warnings
+export const warnsIfNotActing = false;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
-export const schedulePassiveEffects = scheduleDeferredCallback;
-export const cancelPassiveEffects = cancelDeferredCallback;
 
 // -------------------
 //     Persistence
@@ -388,29 +570,9 @@ export function cloneHiddenInstance(
   };
 }
 
-export function cloneUnhiddenInstance(
+export function cloneHiddenTextInstance(
   instance: Instance,
-  type: string,
-  props: Props,
-  internalInstanceHandle: Object,
-): Instance {
-  const viewConfig = instance.canonical.viewConfig;
-  const node = instance.node;
-  const updatePayload = diff(
-    {...props, style: [props.style, {display: 'none'}]},
-    props,
-    viewConfig.validAttributes,
-  );
-  return {
-    node: cloneNodeWithNewProps(node, updatePayload),
-    canonical: instance.canonical,
-  };
-}
-
-export function createHiddenTextInstance(
   text: string,
-  rootContainerInstance: Container,
-  hostContext: HostContext,
   internalInstanceHandle: Object,
 ): TextInstance {
   throw new Error('Not yet implemented.');
@@ -438,3 +600,35 @@ export function replaceContainerChildren(
   container: Container,
   newChildren: ChildSet,
 ): void {}
+
+export function getInstanceFromNode(node: any): empty {
+  throw new Error('Not yet implemented.');
+}
+
+export function beforeActiveInstanceBlur(internalInstanceHandle: Object) {
+  // noop
+}
+
+export function afterActiveInstanceBlur() {
+  // noop
+}
+
+export function preparePortalMount(portalInstance: Instance): void {
+  // noop
+}
+
+export function detachDeletedInstance(node: Instance): void {
+  // noop
+}
+
+export function requestPostPaintCallback(callback: (time: number) => void) {
+  // noop
+}
+
+export function prepareRendererToRender(container: Container): void {
+  // noop
+}
+
+export function resetRendererAfterRender() {
+  // noop
+}

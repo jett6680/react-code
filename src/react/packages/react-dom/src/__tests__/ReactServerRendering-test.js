@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -15,10 +15,6 @@ let ReactDOMServer;
 let PropTypes;
 let ReactCurrentDispatcher;
 
-function normalizeCodeLocInfo(str) {
-  return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
-}
-
 describe('ReactDOMServer', () => {
   beforeEach(() => {
     jest.resetModules();
@@ -33,14 +29,12 @@ describe('ReactDOMServer', () => {
   describe('renderToString', () => {
     it('should generate simple markup', () => {
       const response = ReactDOMServer.renderToString(<span>hello world</span>);
-      expect(response).toMatch(
-        new RegExp('<span data-reactroot=""' + '>hello world</span>'),
-      );
+      expect(response).toMatch(new RegExp('<span' + '>hello world</span>'));
     });
 
     it('should generate simple markup for self-closing tags', () => {
       const response = ReactDOMServer.renderToString(<img />);
-      expect(response).toMatch(new RegExp('<img data-reactroot=""' + '/>'));
+      expect(response).toMatch(new RegExp('<img' + '/>'));
     });
 
     it('should generate comment markup for component returns null', () => {
@@ -76,10 +70,7 @@ describe('ReactDOMServer', () => {
       const response = ReactDOMServer.renderToString(<Parent />);
       expect(response).toMatch(
         new RegExp(
-          '<div ' +
-            'data-reactroot' +
-            '=""' +
-            '>' +
+          '<div>' +
             '<span' +
             '>' +
             'My name is <!-- -->child' +
@@ -138,12 +129,7 @@ describe('ReactDOMServer', () => {
 
         expect(response).toMatch(
           new RegExp(
-            '<span ' +
-              'data-reactroot' +
-              '=""' +
-              '>' +
-              'Component name: <!-- -->TestComponent' +
-              '</span>',
+            '<span>' + 'Component name: <!-- -->TestComponent' + '</span>',
           ),
         );
         expect(lifecycle).toEqual([
@@ -165,17 +151,11 @@ describe('ReactDOMServer', () => {
     });
 
     it('should throw prop mapping error for an <iframe /> with invalid props', () => {
-      let caughtErr;
-      try {
+      expect(() => {
         ReactDOMServer.renderToString(<iframe style="border:none;" />);
-      } catch (err) {
-        caughtErr = err;
-      }
-      expect(caughtErr).not.toBe(undefined);
-      expect(normalizeCodeLocInfo(caughtErr.message)).toContain(
+      }).toThrowError(
         'The `style` prop expects a mapping from style properties to values, not ' +
-          "a string. For example, style={{marginRight: spacing + 'em'}} when using JSX." +
-          (__DEV__ ? '\n    in iframe (at **)' : ''),
+          "a string. For example, style={{marginRight: spacing + 'em'}} when using JSX.",
       );
     });
 
@@ -188,7 +168,7 @@ describe('ReactDOMServer', () => {
               <span unknown="test" />
             </div>,
           )),
-      ).toWarnDev(['React does not recognize the `hasOwnProperty` prop']);
+      ).toErrorDev(['React does not recognize the `hasOwnProperty` prop']);
       expect(html).toContain('<span unknown="test">');
     });
   });
@@ -320,7 +300,7 @@ describe('ReactDOMServer', () => {
           return <div>{this.state.text}</div>;
         }
       }
-      const markup = ReactDOMServer.renderToString(<Component />);
+      const markup = ReactDOMServer.renderToStaticMarkup(<Component />);
       expect(markup).toContain('hello, world');
     });
 
@@ -339,7 +319,7 @@ describe('ReactDOMServer', () => {
           return <div>{this.state.text}</div>;
         }
       }
-      const markup = ReactDOMServer.renderToString(<Component />);
+      const markup = ReactDOMServer.renderToStaticMarkup(<Component />);
       expect(markup).toContain('hello, world');
     });
 
@@ -354,7 +334,7 @@ describe('ReactDOMServer', () => {
         }
       }
 
-      const markup = ReactDOMServer.renderToString(
+      const markup = ReactDOMServer.renderToStaticMarkup(
         <Component text="hello, world" />,
       );
       expect(markup).toContain('hello, world');
@@ -391,7 +371,7 @@ describe('ReactDOMServer', () => {
         text: PropTypes.string,
       };
 
-      const markup = ReactDOMServer.renderToString(
+      const markup = ReactDOMServer.renderToStaticMarkup(
         <ContextProvider>
           <Component />
         </ContextProvider>,
@@ -429,7 +409,7 @@ describe('ReactDOMServer', () => {
         );
       }
 
-      const markup = ReactDOMServer.renderToString(<App value={1} />);
+      const markup = ReactDOMServer.renderToStaticMarkup(<App value={1} />);
       // Extract the numbers rendered by the consumers
       const results = markup.match(/\d+/g).map(Number);
       expect(results).toEqual([2, 1, 3, 1]);
@@ -467,7 +447,7 @@ describe('ReactDOMServer', () => {
         );
       }
 
-      const markup = ReactDOMServer.renderToString(<App value={1} />);
+      const markup = ReactDOMServer.renderToStaticMarkup(<App value={1} />);
       // Extract the numbers rendered by the consumers
       const results = markup.match(/\d+/g).map(Number);
       expect(results).toEqual([2, 1, 3, 1]);
@@ -484,7 +464,7 @@ describe('ReactDOMServer', () => {
 
       let reentrantMarkup;
       function Reentrant() {
-        reentrantMarkup = ReactDOMServer.renderToString(
+        reentrantMarkup = ReactDOMServer.renderToStaticMarkup(
           <App value={1} reentrant={false} />,
         );
         return null;
@@ -512,7 +492,7 @@ describe('ReactDOMServer', () => {
         );
       }
 
-      const markup = ReactDOMServer.renderToString(
+      const markup = ReactDOMServer.renderToStaticMarkup(
         <App value={1} reentrant={true} />,
       );
       // Extract the numbers rendered by the consumers
@@ -554,22 +534,73 @@ describe('ReactDOMServer', () => {
         ),
       ).not.toThrow();
     });
+
+    it('renders synchronously resolved lazy component', () => {
+      const LazyFoo = React.lazy(() => ({
+        then(resolve) {
+          resolve({
+            default: function Foo({id}) {
+              return <div id={id}>lazy</div>;
+            },
+          });
+        },
+      }));
+
+      expect(ReactDOMServer.renderToStaticMarkup(<LazyFoo id="foo" />)).toEqual(
+        '<div id="foo">lazy</div>',
+      );
+    });
+
+    it('throws error from synchronously rejected lazy component', () => {
+      const LazyFoo = React.lazy(() => ({
+        then(resolve, reject) {
+          reject(new Error('Bad lazy'));
+        },
+      }));
+
+      expect(() => ReactDOMServer.renderToStaticMarkup(<LazyFoo />)).toThrow(
+        'Bad lazy',
+      );
+    });
+
+    it('aborts synchronously any suspended tasks and renders their fallbacks', () => {
+      const promise = new Promise(res => {});
+      function Suspender() {
+        throw promise;
+      }
+      const response = ReactDOMServer.renderToStaticMarkup(
+        <React.Suspense fallback={'fallback'}>
+          <Suspender />
+        </React.Suspense>,
+      );
+      expect(response).toEqual('fallback');
+    });
   });
 
   describe('renderToNodeStream', () => {
     it('should generate simple markup', () => {
       const SuccessfulElement = React.createElement(() => <img />);
-      const response = ReactDOMServer.renderToNodeStream(SuccessfulElement);
-      expect(response.read().toString()).toMatch(
-        new RegExp('<img data-reactroot=""' + '/>'),
+      let response;
+      expect(() => {
+        response = ReactDOMServer.renderToNodeStream(SuccessfulElement);
+      }).toErrorDev(
+        'renderToNodeStream is deprecated. Use renderToPipeableStream instead.',
+        {withoutStack: true},
       );
+      expect(response.read().toString()).toMatch(new RegExp('<img' + '/>'));
     });
 
     it('should handle errors correctly', () => {
       const FailingElement = React.createElement(() => {
         throw new Error('An Error');
       });
-      const response = ReactDOMServer.renderToNodeStream(FailingElement);
+      let response;
+      expect(() => {
+        response = ReactDOMServer.renderToNodeStream(FailingElement);
+      }).toErrorDev(
+        'renderToNodeStream is deprecated. Use renderToPipeableStream instead.',
+        {withoutStack: true},
+      );
       return new Promise(resolve => {
         response.once('error', () => {
           resolve();
@@ -600,6 +631,41 @@ describe('ReactDOMServer', () => {
         expect(response.read()).toBeNull();
       });
     });
+
+    it('should refer users to new apis when using suspense', async () => {
+      let resolve = null;
+      const promise = new Promise(res => {
+        resolve = () => {
+          resolved = true;
+          res();
+        };
+      });
+      let resolved = false;
+      function Suspender() {
+        if (resolved) {
+          return 'resolved';
+        }
+        throw promise;
+      }
+
+      let response;
+      expect(() => {
+        response = ReactDOMServer.renderToNodeStream(
+          <div>
+            <React.Suspense fallback={'fallback'}>
+              <Suspender />
+            </React.Suspense>
+          </div>,
+        );
+      }).toErrorDev(
+        'renderToNodeStream is deprecated. Use renderToPipeableStream instead.',
+        {withoutStack: true},
+      );
+      await resolve();
+      expect(response.read().toString()).toEqual(
+        '<div><!--$-->resolved<!-- --><!--/$--></div>',
+      );
+    });
   });
 
   it('warns with a no-op when an async setState is triggered', () => {
@@ -616,7 +682,9 @@ describe('ReactDOMServer', () => {
     }
 
     ReactDOMServer.renderToString(<Foo />);
-    expect(() => jest.runOnlyPendingTimers()).toWarnDev(
+    expect(() =>
+      jest.runOnlyPendingTimers(),
+    ).toErrorDev(
       'Warning: setState(...): Can only update a mounting component.' +
         ' This usually means you called setState() outside componentWillMount() on the server.' +
         ' This is a no-op.\n\nPlease check the code for the Foo component.',
@@ -644,7 +712,9 @@ describe('ReactDOMServer', () => {
     }
 
     ReactDOMServer.renderToString(<Baz />);
-    expect(() => jest.runOnlyPendingTimers()).toWarnDev(
+    expect(() =>
+      jest.runOnlyPendingTimers(),
+    ).toErrorDev(
       'Warning: forceUpdate(...): Can only update a mounting component. ' +
         'This usually means you called forceUpdate() outside componentWillMount() on the server. ' +
         'This is a no-op.\n\nPlease check the code for the Baz component.',
@@ -654,27 +724,58 @@ describe('ReactDOMServer', () => {
     expect(markup).toBe('<div></div>');
   });
 
-  it('throws for unsupported types on the server', () => {
-    expect(() => {
-      ReactDOMServer.renderToString(<React.Suspense />);
-    }).toThrow('ReactDOMServer does not yet support Suspense.');
-
-    async function fakeImport(result) {
-      return {default: result};
+  it('does not get confused by throwing null', () => {
+    function Bad() {
+      // eslint-disable-next-line no-throw-literal
+      throw null;
     }
 
-    expect(() => {
-      const LazyFoo = React.lazy(() =>
-        fakeImport(
-          new Promise(resolve =>
-            resolve(function Foo() {
-              return <div />;
-            }),
-          ),
-        ),
-      );
-      ReactDOMServer.renderToString(<LazyFoo />);
-    }).toThrow('ReactDOMServer does not yet support lazy-loaded components.');
+    let didError;
+    let error;
+    try {
+      ReactDOMServer.renderToString(<Bad />);
+    } catch (err) {
+      didError = true;
+      error = err;
+    }
+    expect(didError).toBe(true);
+    expect(error).toBe(null);
+  });
+
+  it('does not get confused by throwing undefined', () => {
+    function Bad() {
+      // eslint-disable-next-line no-throw-literal
+      throw undefined;
+    }
+
+    let didError;
+    let error;
+    try {
+      ReactDOMServer.renderToString(<Bad />);
+    } catch (err) {
+      didError = true;
+      error = err;
+    }
+    expect(didError).toBe(true);
+    expect(error).toBe(undefined);
+  });
+
+  it('does not get confused by throwing a primitive', () => {
+    function Bad() {
+      // eslint-disable-next-line no-throw-literal
+      throw 'foo';
+    }
+
+    let didError;
+    let error;
+    try {
+      ReactDOMServer.renderToString(<Bad />);
+    } catch (err) {
+      didError = true;
+      error = err;
+    }
+    expect(didError).toBe(true);
+    expect(error).toBe('foo');
   });
 
   it('should throw (in dev) when children are mutated during render', () => {
@@ -725,7 +826,7 @@ describe('ReactDOMServer', () => {
           </svg>
         </div>,
       ),
-    ).toWarnDev([
+    ).toErrorDev([
       'Warning: <inPUT /> is using incorrect casing. ' +
         'Use PascalCase for React components, ' +
         'or lowercase for HTML elements.',
@@ -739,7 +840,7 @@ describe('ReactDOMServer', () => {
   it('should warn about contentEditable and children', () => {
     expect(() =>
       ReactDOMServer.renderToString(<div contentEditable={true} children="" />),
-    ).toWarnDev(
+    ).toErrorDev(
       'Warning: A component is `contentEditable` and contains `children` ' +
         'managed by React. It is now your responsibility to guarantee that ' +
         'none of those nodes are unexpectedly modified or duplicated. This ' +
@@ -758,11 +859,10 @@ describe('ReactDOMServer', () => {
       expect(() =>
         ReactDOMServer.renderToString(<ClassWithRenderNotExtended />),
       ).toThrow(TypeError);
-    }).toWarnDev(
+    }).toErrorDev(
       'Warning: The <ClassWithRenderNotExtended /> component appears to have a render method, ' +
         "but doesn't extend React.Component. This is likely to cause errors. " +
         'Change ClassWithRenderNotExtended to extend React.Component instead.',
-      {withoutStack: true},
     );
 
     // Test deduplication
@@ -828,7 +928,7 @@ describe('ReactDOMServer', () => {
       );
     }
 
-    expect(() => ReactDOMServer.renderToString(<App />)).toWarnDev([
+    expect(() => ReactDOMServer.renderToString(<App />)).toErrorDev([
       'Invalid ARIA attribute `ariaTypo`. ARIA attributes follow the pattern aria-* and must be lowercase.\n' +
         '    in span (at **)\n' +
         '    in b (at **)\n' +
@@ -877,7 +977,7 @@ describe('ReactDOMServer', () => {
       );
     }
 
-    expect(() => ReactDOMServer.renderToString(<App />)).toWarnDev([
+    expect(() => ReactDOMServer.renderToString(<App />)).toErrorDev([
       // ReactDOMServer(App > div > span)
       'Invalid ARIA attribute `ariaTypo`. ARIA attributes follow the pattern aria-* and must be lowercase.\n' +
         '    in span (at **)\n' +
@@ -924,11 +1024,10 @@ describe('ReactDOMServer', () => {
 
     expect(() => {
       ReactDOMServer.renderToString(<ComponentA />);
-    }).toWarnDev(
+    }).toErrorDev(
       'Warning: ComponentA defines an invalid contextType. ' +
         'contextType should point to the Context object returned by React.createContext(). ' +
         'Did you accidentally pass the Context.Consumer instead?',
-      {withoutStack: true},
     );
 
     // Warnings should be deduped by component type
@@ -936,11 +1035,10 @@ describe('ReactDOMServer', () => {
 
     expect(() => {
       ReactDOMServer.renderToString(<ComponentB />);
-    }).toWarnDev(
+    }).toErrorDev(
       'Warning: ComponentB defines an invalid contextType. ' +
         'contextType should point to the Context object returned by React.createContext(). ' +
         'Did you accidentally pass the Context.Provider instead?',
-      {withoutStack: true},
     );
   });
 
@@ -971,14 +1069,13 @@ describe('ReactDOMServer', () => {
       expect(() => {
         ReactDOMServer.renderToString(<Foo />);
       }).toThrow("Cannot read property 'world' of undefined");
-    }).toWarnDev(
+    }).toErrorDev(
       'Foo defines an invalid contextType. ' +
         'contextType should point to the Context object returned by React.createContext(). ' +
         'However, it is set to undefined. ' +
         'This can be caused by a typo or by mixing up named and default imports. ' +
         'This can also happen due to a circular dependency, ' +
         'so try moving the createContext() call to a separate file.',
-      {withoutStack: true},
     );
   });
 
@@ -998,11 +1095,10 @@ describe('ReactDOMServer', () => {
       expect(() => {
         ReactDOMServer.renderToString(<Foo />);
       }).toThrow("Cannot read property 'hello' of undefined");
-    }).toWarnDev(
+    }).toErrorDev(
       'Foo defines an invalid contextType. ' +
         'contextType should point to the Context object returned by React.createContext(). ' +
         'However, it is set to an object with keys {x, y}.',
-      {withoutStack: true},
     );
   });
 
@@ -1018,11 +1114,49 @@ describe('ReactDOMServer', () => {
       expect(() => {
         ReactDOMServer.renderToString(<Foo />);
       }).toThrow("Cannot read property 'world' of undefined");
-    }).toWarnDev(
+    }).toErrorDev(
       'Foo defines an invalid contextType. ' +
         'contextType should point to the Context object returned by React.createContext(). ' +
         'However, it is set to a string.',
-      {withoutStack: true},
     );
+  });
+
+  describe('custom element server rendering', () => {
+    it('String properties should be server rendered for custom elements', () => {
+      const output = ReactDOMServer.renderToString(
+        <my-custom-element foo="bar" />,
+      );
+      expect(output).toBe(`<my-custom-element foo="bar"></my-custom-element>`);
+    });
+
+    it('Number properties should be server rendered for custom elements', () => {
+      const output = ReactDOMServer.renderToString(
+        <my-custom-element foo={5} />,
+      );
+      expect(output).toBe(`<my-custom-element foo="5"></my-custom-element>`);
+    });
+
+    // @gate enableCustomElementPropertySupport
+    it('Object properties should not be server rendered for custom elements', () => {
+      const output = ReactDOMServer.renderToString(
+        <my-custom-element foo={{foo: 'bar'}} />,
+      );
+      expect(output).toBe(`<my-custom-element></my-custom-element>`);
+    });
+
+    // @gate enableCustomElementPropertySupport
+    it('Array properties should not be server rendered for custom elements', () => {
+      const output = ReactDOMServer.renderToString(
+        <my-custom-element foo={['foo', 'bar']} />,
+      );
+      expect(output).toBe(`<my-custom-element></my-custom-element>`);
+    });
+
+    it('Function properties should not be server rendered for custom elements', () => {
+      const output = ReactDOMServer.renderToString(
+        <my-custom-element foo={() => console.log('bar')} />,
+      );
+      expect(output).toBe(`<my-custom-element></my-custom-element>`);
+    });
   });
 });

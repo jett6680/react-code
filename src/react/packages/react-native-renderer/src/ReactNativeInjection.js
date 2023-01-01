@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,13 +14,13 @@ import {
   getInstanceFromNode,
   getNodeFromInstance,
 } from './ReactNativeComponentTree';
-import {setComponentTree} from 'events/EventPluginUtils';
+import {setComponentTree} from './legacy-events/EventPluginUtils';
 import {receiveEvent, receiveTouches} from './ReactNativeEventEmitter';
 import ReactNativeGlobalResponderHandler from './ReactNativeGlobalResponderHandler';
-import ResponderEventPlugin from 'events/ResponderEventPlugin';
+import ResponderEventPlugin from './legacy-events/ResponderEventPlugin';
 
 // Module provided by RN:
-import RCTEventEmitter from 'RCTEventEmitter';
+import {RCTEventEmitter} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
 
 /**
  * Register the event emitter with the native bridge

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,18 +7,22 @@
  * @flow
  */
 
+import type {ElementRef} from 'react';
 import type {
+  HostComponent,
   MeasureInWindowOnSuccessCallback,
   MeasureLayoutOnSuccessCallback,
   MeasureOnSuccessCallback,
-  NativeMethodsMixinType,
-  ReactNativeBaseComponentViewConfig,
+  NativeMethods,
+  ViewConfig,
 } from './ReactNativeTypes';
 import type {Instance} from './ReactNativeHostConfig';
 
 // Modules provided by RN:
-import TextInputState from 'TextInputState';
-import UIManager from 'UIManager';
+import {
+  TextInputState,
+  UIManager,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
 
 import {create} from './ReactNativeAttributePayload';
 import {
@@ -26,30 +30,31 @@ import {
   warnForStyleProps,
 } from './NativeMethodsMixinUtils';
 
-/**
- * This component defines the same methods as NativeMethodsMixin but without the
- * findNodeHandle wrapper. This wrapper is unnecessary for HostComponent views
- * and would also result in a circular require.js dependency (since
- * ReactNativeFiber depends on this component and NativeMethodsMixin depends on
- * ReactNativeFiber).
- */
 class ReactNativeFiberHostComponent {
   _children: Array<Instance | number>;
   _nativeTag: number;
-  viewConfig: ReactNativeBaseComponentViewConfig<>;
+  _internalFiberInstanceHandleDEV: Object;
+  viewConfig: ViewConfig;
 
-  constructor(tag: number, viewConfig: ReactNativeBaseComponentViewConfig<>) {
+  constructor(
+    tag: number,
+    viewConfig: ViewConfig,
+    internalInstanceHandleDEV: Object,
+  ) {
     this._nativeTag = tag;
     this._children = [];
     this.viewConfig = viewConfig;
+    if (__DEV__) {
+      this._internalFiberInstanceHandleDEV = internalInstanceHandleDEV;
+    }
   }
 
   blur() {
-    TextInputState.blurTextInput(this._nativeTag);
+    TextInputState.blurTextInput(this);
   }
 
   focus() {
-    TextInputState.focusTextInput(this._nativeTag);
+    TextInputState.focusTextInput(this);
   }
 
   measure(callback: MeasureOnSuccessCallback) {
@@ -67,13 +72,35 @@ class ReactNativeFiberHostComponent {
   }
 
   measureLayout(
-    relativeToNativeNode: number,
+    relativeToNativeNode: number | ElementRef<HostComponent<mixed>>,
     onSuccess: MeasureLayoutOnSuccessCallback,
-    onFail: () => void /* currently unused */,
+    onFail?: () => void /* currently unused */,
   ) {
+    let relativeNode: ?number;
+
+    if (typeof relativeToNativeNode === 'number') {
+      // Already a node handle
+      relativeNode = relativeToNativeNode;
+    } else {
+      const nativeNode: ReactNativeFiberHostComponent = (relativeToNativeNode: any);
+      if (nativeNode._nativeTag) {
+        relativeNode = nativeNode._nativeTag;
+      }
+    }
+
+    if (relativeNode == null) {
+      if (__DEV__) {
+        console.error(
+          'Warning: ref.measureLayout must be called with a node handle or a ref to a native component.',
+        );
+      }
+
+      return;
+    }
+
     UIManager.measureLayout(
       this._nativeTag,
-      relativeToNativeNode,
+      relativeNode,
       mountSafeCallback_NOT_REALLY_SAFE(this, onFail),
       mountSafeCallback_NOT_REALLY_SAFE(this, onSuccess),
     );
@@ -99,7 +126,8 @@ class ReactNativeFiberHostComponent {
   }
 }
 
-// eslint-disable-next-line no-unused-expressions
-(ReactNativeFiberHostComponent.prototype: NativeMethodsMixinType);
+// $FlowFixMe[class-object-subtyping] found when upgrading Flow
+// $FlowFixMe[method-unbinding] found when upgrading Flow
+(ReactNativeFiberHostComponent.prototype: $ReadOnly<{...NativeMethods, ...}>);
 
 export default ReactNativeFiberHostComponent;

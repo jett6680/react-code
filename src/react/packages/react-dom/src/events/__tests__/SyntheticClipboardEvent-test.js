@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -115,43 +115,6 @@ describe('SyntheticClipboardEvent', () => {
       div.dispatchEvent(event);
 
       expect(expectedCount).toBe(3);
-    });
-
-    it('is able to `persist`', () => {
-      const persistentEvents = [];
-      const eventHandler = event => {
-        expect(event.isPersistent()).toBe(false);
-        event.persist();
-        expect(event.isPersistent()).toBe(true);
-        persistentEvents.push(event);
-      };
-
-      const div = ReactDOM.render(
-        <div
-          onCopy={eventHandler}
-          onCut={eventHandler}
-          onPaste={eventHandler}
-        />,
-        container,
-      );
-
-      let event;
-      event = document.createEvent('Event');
-      event.initEvent('copy', true, true);
-      div.dispatchEvent(event);
-
-      event = document.createEvent('Event');
-      event.initEvent('cut', true, true);
-      div.dispatchEvent(event);
-
-      event = document.createEvent('Event');
-      event.initEvent('paste', true, true);
-      div.dispatchEvent(event);
-
-      expect(persistentEvents.length).toBe(3);
-      expect(persistentEvents[0].type).toBe('copy');
-      expect(persistentEvents[1].type).toBe('cut');
-      expect(persistentEvents[2].type).toBe('paste');
     });
   });
 });

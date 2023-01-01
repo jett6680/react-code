@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-present, Facebook, Inc.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,7 +13,7 @@ let React;
 let ReactDOM;
 let Suspense;
 let ReactCache;
-let ReactTestUtils;
+let Scheduler;
 let TextResource;
 let act;
 
@@ -25,19 +25,22 @@ describe('ReactDOMSuspensePlaceholder', () => {
     React = require('react');
     ReactDOM = require('react-dom');
     ReactCache = require('react-cache');
-    ReactTestUtils = require('react-dom/test-utils');
-    act = ReactTestUtils.act;
+    Scheduler = require('scheduler');
+    act = require('jest-react').act;
     Suspense = React.Suspense;
     container = document.createElement('div');
     document.body.appendChild(container);
 
-    TextResource = ReactCache.unstable_createResource(([text, ms = 0]) => {
-      return new Promise((resolve, reject) =>
-        setTimeout(() => {
-          resolve(text);
-        }, ms),
-      );
-    }, ([text, ms]) => text);
+    TextResource = ReactCache.unstable_createResource(
+      ([text, ms = 0]) => {
+        return new Promise((resolve, reject) =>
+          setTimeout(() => {
+            resolve(text);
+          }, ms),
+        );
+      },
+      ([text, ms]) => text,
+    );
   });
 
   afterEach(() => {
@@ -67,45 +70,47 @@ describe('ReactDOMSuspensePlaceholder', () => {
   }
 
   it('hides and unhides timed out DOM elements', async () => {
-    let divs = [
+    const divs = [
       React.createRef(null),
       React.createRef(null),
       React.createRef(null),
     ];
     function App() {
       return (
-        <Suspense maxDuration={500} fallback={<Text text="Loading..." />}>
+        <Suspense fallback={<Text text="Loading..." />}>
           <div ref={divs[0]}>
             <Text text="A" />
           </div>
           <div ref={divs[1]}>
-            <AsyncText ms={1000} text="B" />
+            <AsyncText ms={500} text="B" />
           </div>
-          <div style={{display: 'block'}} ref={divs[2]}>
+          <div style={{display: 'inline'}} ref={divs[2]}>
             <Text text="C" />
           </div>
         </Suspense>
       );
     }
     ReactDOM.render(<App />, container);
-    expect(divs[0].current.style.display).toEqual('none');
-    expect(divs[1].current.style.display).toEqual('none');
-    expect(divs[2].current.style.display).toEqual('none');
+    expect(window.getComputedStyle(divs[0].current).display).toEqual('none');
+    expect(window.getComputedStyle(divs[1].current).display).toEqual('none');
+    expect(window.getComputedStyle(divs[2].current).display).toEqual('none');
 
-    await advanceTimers(1000);
+    await advanceTimers(500);
 
-    expect(divs[0].current.style.display).toEqual('');
-    expect(divs[1].current.style.display).toEqual('');
+    Scheduler.unstable_flushAll();
+
+    expect(window.getComputedStyle(divs[0].current).display).toEqual('block');
+    expect(window.getComputedStyle(divs[1].current).display).toEqual('block');
     // This div's display was set with a prop.
-    expect(divs[2].current.style.display).toEqual('block');
+    expect(window.getComputedStyle(divs[2].current).display).toEqual('inline');
   });
 
   it('hides and unhides timed out text nodes', async () => {
     function App() {
       return (
-        <Suspense maxDuration={500} fallback={<Text text="Loading..." />}>
+        <Suspense fallback={<Text text="Loading..." />}>
           <Text text="A" />
-          <AsyncText ms={1000} text="B" />
+          <AsyncText ms={500} text="B" />
           <Text text="C" />
         </Suspense>
       );
@@ -113,7 +118,9 @@ describe('ReactDOMSuspensePlaceholder', () => {
     ReactDOM.render(<App />, container);
     expect(container.textContent).toEqual('Loading...');
 
-    await advanceTimers(1000);
+    await advanceTimers(500);
+
+    Scheduler.unstable_flushAll();
 
     expect(container.textContent).toEqual('ABC');
   });
@@ -137,10 +144,10 @@ describe('ReactDOMSuspensePlaceholder', () => {
 
       function App() {
         return (
-          <Suspense maxDuration={500} fallback={<Text text="Loading..." />}>
+          <Suspense fallback={<Text text="Loading..." />}>
             <Sibling>Sibling</Sibling>
             <span>
-              <AsyncText ms={1000} text="Async" />
+              <AsyncText ms={500} text="Async" />
             </span>
           </Suspense>
         );
@@ -150,15 +157,19 @@ describe('ReactDOMSuspensePlaceholder', () => {
         ReactDOM.render(<App />, container);
       });
       expect(container.innerHTML).toEqual(
-        '<span style="display: none;">Sibling</span><span style="display: none;"></span>Loading...',
+        '<span style="display: none;">Sibling</span><span style=' +
+          '"display: none;"></span>Loading...',
       );
 
       act(() => setIsVisible(true));
       expect(container.innerHTML).toEqual(
-        '<span style="display: none;">Sibling</span><span style="display: none;"></span>Loading...',
+        '<span style="display: none;">Sibling</span><span style=' +
+          '"display: none;"></span>Loading...',
       );
 
-      await advanceTimers(1000);
+      await advanceTimers(500);
+
+      Scheduler.unstable_flushAll();
 
       expect(container.innerHTML).toEqual(
         '<span style="display: inline;">Sibling</span><span style="">Async</span>',
@@ -224,5 +235,49 @@ describe('ReactDOMSuspensePlaceholder', () => {
     buttonRef.current.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     await Lazy;
     expect(log).toEqual(['cDU first', 'cDU second']);
+  });
+
+  // Regression test for https://github.com/facebook/react/issues/14188
+  it('can call findDOMNode() in a suspended component commit phase (#2)', () => {
+    let suspendOnce = Promise.resolve();
+    function Suspend() {
+      if (suspendOnce) {
+        const promise = suspendOnce;
+        suspendOnce = null;
+        throw promise;
+      }
+      return null;
+    }
+
+    const log = [];
+    class Child extends React.Component {
+      componentDidMount() {
+        log.push('cDM');
+        ReactDOM.findDOMNode(this);
+      }
+
+      componentDidUpdate() {
+        log.push('cDU');
+        ReactDOM.findDOMNode(this);
+      }
+
+      render() {
+        return null;
+      }
+    }
+
+    function App() {
+      return (
+        <Suspense fallback="Loading">
+          <Suspend />
+          <Child />
+        </Suspense>
+      );
+    }
+
+    ReactDOM.render(<App />, container);
+    expect(log).toEqual(['cDM']);
+    ReactDOM.render(<App />, container);
+    expect(log).toEqual(['cDM', 'cDU']);
   });
 });

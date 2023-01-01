@@ -1,16 +1,44 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
- *
- * @flow
  */
 
-'use strict';
+// This file is only used for tests.
+// It lazily loads the implementation so that we get the correct set of host configs.
 
-const ReactDOMServer = require('./src/server/ReactDOMServerNode');
+import ReactVersion from 'shared/ReactVersion';
+export {ReactVersion as version};
 
-// TODO: decide on the top-level export form.
-// This is hacky but makes it work with both Rollup and Jest
-module.exports = ReactDOMServer.default || ReactDOMServer;
+export function renderToString() {
+  return require('./src/server/ReactDOMLegacyServerNode').renderToString.apply(
+    this,
+    arguments,
+  );
+}
+export function renderToStaticMarkup() {
+  return require('./src/server/ReactDOMLegacyServerNode').renderToStaticMarkup.apply(
+    this,
+    arguments,
+  );
+}
+export function renderToNodeStream() {
+  return require('./src/server/ReactDOMLegacyServerNode').renderToNodeStream.apply(
+    this,
+    arguments,
+  );
+}
+export function renderToStaticNodeStream() {
+  return require('./src/server/ReactDOMLegacyServerNode').renderToStaticNodeStream.apply(
+    this,
+    arguments,
+  );
+}
+
+export function renderToPipeableStream() {
+  return require('./src/server/ReactDOMFizzServerNode').renderToPipeableStream.apply(
+    this,
+    arguments,
+  );
+}

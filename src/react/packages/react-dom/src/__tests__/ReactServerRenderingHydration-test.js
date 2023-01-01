@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,9 +9,14 @@
 
 'use strict';
 
+global.TextEncoder = require('util').TextEncoder;
+
 let React;
 let ReactDOM;
+let ReactDOMClient;
 let ReactDOMServer;
+let ReactDOMServerBrowser;
+let Scheduler;
 
 // These tests rely both on ReactDOMServer and ReactDOM.
 // If a test only needs ReactDOMServer, put it in ReactServerRendering-test instead.
@@ -20,102 +25,10 @@ describe('ReactDOMServerHydration', () => {
     jest.resetModules();
     React = require('react');
     ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
     ReactDOMServer = require('react-dom/server');
-  });
-
-  it('should have the correct mounting behavior (old hydrate API)', () => {
-    let mountCount = 0;
-    let numClicks = 0;
-
-    class TestComponent extends React.Component {
-      componentDidMount() {
-        mountCount++;
-      }
-
-      click = () => {
-        numClicks++;
-      };
-
-      render() {
-        return (
-          <span ref="span" onClick={this.click}>
-            Name: {this.props.name}
-          </span>
-        );
-      }
-    }
-
-    const element = document.createElement('div');
-    document.body.appendChild(element);
-    try {
-      ReactDOM.render(<TestComponent />, element);
-
-      let lastMarkup = element.innerHTML;
-
-      // Exercise the update path. Markup should not change,
-      // but some lifecycle methods should be run again.
-      ReactDOM.render(<TestComponent name="x" />, element);
-      expect(mountCount).toEqual(1);
-
-      // Unmount and remount. We should get another mount event and
-      // we should get different markup, as the IDs are unique each time.
-      ReactDOM.unmountComponentAtNode(element);
-      expect(element.innerHTML).toEqual('');
-      ReactDOM.render(<TestComponent name="x" />, element);
-      expect(mountCount).toEqual(2);
-      expect(element.innerHTML).not.toEqual(lastMarkup);
-
-      // Now kill the node and render it on top of server-rendered markup, as if
-      // we used server rendering. We should mount again, but the markup should
-      // be unchanged. We will append a sentinel at the end of innerHTML to be
-      // sure that innerHTML was not changed.
-      ReactDOM.unmountComponentAtNode(element);
-      expect(element.innerHTML).toEqual('');
-
-      lastMarkup = ReactDOMServer.renderToString(<TestComponent name="x" />);
-      element.innerHTML = lastMarkup;
-
-      let instance;
-
-      expect(() => {
-        instance = ReactDOM.render(<TestComponent name="x" />, element);
-      }).toLowPriorityWarnDev(
-        'render(): Calling ReactDOM.render() to hydrate server-rendered markup ' +
-          'will stop working in React v17. Replace the ReactDOM.render() call ' +
-          'with ReactDOM.hydrate() if you want React to attach to the server HTML.',
-        {withoutStack: true},
-      );
-      expect(mountCount).toEqual(3);
-      expect(element.innerHTML).toBe(lastMarkup);
-
-      // Ensure the events system works after mount into server markup
-      expect(numClicks).toEqual(0);
-
-      instance.refs.span.click();
-      expect(numClicks).toEqual(1);
-
-      ReactDOM.unmountComponentAtNode(element);
-      expect(element.innerHTML).toEqual('');
-
-      // Now simulate a situation where the app is not idempotent. React should
-      // warn but do the right thing.
-      element.innerHTML = lastMarkup;
-      expect(() => {
-        instance = ReactDOM.render(<TestComponent name="y" />, element);
-      }).toWarnDev('Text content did not match. Server: "x" Client: "y"', {
-        withoutStack: true,
-      });
-      expect(mountCount).toEqual(4);
-      expect(element.innerHTML.length > 0).toBe(true);
-      expect(element.innerHTML).not.toEqual(lastMarkup);
-
-      // Ensure the events system works after markup mismatch.
-      expect(numClicks).toEqual(1);
-      instance.refs.span.click();
-      expect(numClicks).toEqual(2);
-    } finally {
-      document.body.removeChild(element);
-    }
+    ReactDOMServerBrowser = require('react-dom/server.browser');
+    Scheduler = require('scheduler');
   });
 
   it('should have the correct mounting behavior (new hydrate API)', () => {
@@ -123,6 +36,8 @@ describe('ReactDOMServerHydration', () => {
     let numClicks = 0;
 
     class TestComponent extends React.Component {
+      spanRef = React.createRef();
+
       componentDidMount() {
         mountCount++;
       }
@@ -133,7 +48,7 @@ describe('ReactDOMServerHydration', () => {
 
       render() {
         return (
-          <span ref="span" onClick={this.click}>
+          <span ref={this.spanRef} onClick={this.click}>
             Name: {this.props.name}
           </span>
         );
@@ -176,7 +91,7 @@ describe('ReactDOMServerHydration', () => {
 
       // Ensure the events system works after mount into server markup
       expect(numClicks).toEqual(0);
-      instance.refs.span.click();
+      instance.spanRef.current.click();
       expect(numClicks).toEqual(1);
 
       ReactDOM.unmountComponentAtNode(element);
@@ -187,16 +102,14 @@ describe('ReactDOMServerHydration', () => {
       element.innerHTML = lastMarkup;
       expect(() => {
         instance = ReactDOM.hydrate(<TestComponent name="y" />, element);
-      }).toWarnDev('Text content did not match. Server: "x" Client: "y"', {
-        withoutStack: true,
-      });
+      }).toErrorDev('Text content did not match. Server: "x" Client: "y"');
       expect(mountCount).toEqual(4);
       expect(element.innerHTML.length > 0).toBe(true);
       expect(element.innerHTML).not.toEqual(lastMarkup);
 
       // Ensure the events system works after markup mismatch.
       expect(numClicks).toEqual(1);
-      instance.refs.span.click();
+      instance.spanRef.current.click();
       expect(numClicks).toEqual(2);
     } finally {
       document.body.removeChild(element);
@@ -250,9 +163,8 @@ describe('ReactDOMServerHydration', () => {
 
     expect(() =>
       ReactDOM.hydrate(<button autoFocus={false}>client</button>, element),
-    ).toWarnDev(
+    ).toErrorDev(
       'Warning: Text content did not match. Server: "server" Client: "client"',
-      {withoutStack: true},
     );
 
     expect(element.firstChild.focus).not.toHaveBeenCalled();
@@ -273,11 +185,10 @@ describe('ReactDOMServerHydration', () => {
         />,
         element,
       ),
-    ).toWarnDev(
+    ).toErrorDev(
       'Warning: Prop `style` did not match. Server: ' +
         '"text-decoration:none;color:black;height:10px" Client: ' +
         '"text-decoration:none;color:white;height:10px"',
-      {withoutStack: true},
     );
   });
 
@@ -293,7 +204,7 @@ describe('ReactDOMServerHydration', () => {
       // Simulate IE normalizing the style attribute. IE makes it equal to
       // what's available under `node.style.cssText`.
       element.innerHTML =
-        '<div style="height: 10px; color: black; text-decoration: none;" data-reactroot=""></div>';
+        '<div style="height: 10px; color: black; text-decoration: none;"></div>';
 
       // We don't expect to see false positive warnings.
       // https://github.com/facebook/react/issues/11807
@@ -312,7 +223,7 @@ describe('ReactDOMServerHydration', () => {
     const element = document.createElement('div');
 
     element.innerHTML =
-      '<div style="text-decoration: none; color: black; height: 10px;" data-reactroot=""></div>';
+      '<div style="text-decoration: none; color: black; height: 10px;"></div>';
 
     expect(() =>
       ReactDOM.hydrate(
@@ -321,11 +232,10 @@ describe('ReactDOMServerHydration', () => {
         />,
         element,
       ),
-    ).toWarnDev(
+    ).toErrorDev(
       'Warning: Prop `style` did not match. Server: ' +
         '"text-decoration: none; color: black; height: 10px;" Client: ' +
         '"text-decoration:none;color:black;height:10px"',
-      {withoutStack: true},
     );
   });
 
@@ -358,12 +268,16 @@ describe('ReactDOMServerHydration', () => {
     );
 
     const element = document.createElement('div');
-    element.innerHTML = ReactDOMServer.renderToString(markup);
+    expect(() => {
+      element.innerHTML = ReactDOMServer.renderToString(markup);
+    }).toWarnDev('componentWillMount has been renamed');
     expect(element.textContent).toBe('Hi');
 
-    expect(() => ReactDOM.hydrate(markup, element)).toWarnDev(
-      'Please update the following components to use componentDidMount instead: ComponentWithWarning',
-    );
+    expect(() => {
+      ReactDOM.hydrate(markup, element);
+    }).toWarnDev('componentWillMount has been renamed', {
+      withoutStack: true,
+    });
     expect(element.textContent).toBe('Hi');
   });
 
@@ -391,9 +305,9 @@ describe('ReactDOMServerHydration', () => {
   it('should be able to render and hydrate Profiler components', () => {
     const callback = jest.fn();
     const markup = (
-      <React.unstable_Profiler id="profiler" onRender={callback}>
+      <React.Profiler id="profiler" onRender={callback}>
         <div>Hi</div>
-      </React.unstable_Profiler>
+      </React.Profiler>
     );
 
     const element = document.createElement('div');
@@ -488,6 +402,296 @@ describe('ReactDOMServerHydration', () => {
 
     jest.runAllTimers();
     await Promise.resolve();
+    Scheduler.unstable_flushAll();
+    await null;
     expect(element.textContent).toBe('Hello world');
+  });
+
+  it('does not re-enter hydration after committing the first one', () => {
+    const finalHTML = ReactDOMServer.renderToString(<div />);
+    const container = document.createElement('div');
+    container.innerHTML = finalHTML;
+    const root = ReactDOMClient.hydrateRoot(container, <div />);
+    Scheduler.unstable_flushAll();
+    root.render(null);
+    Scheduler.unstable_flushAll();
+    // This should not reenter hydration state and therefore not trigger hydration
+    // warnings.
+    root.render(<div />);
+    Scheduler.unstable_flushAll();
+  });
+
+  it('Suspense + hydration in legacy mode', () => {
+    const element = document.createElement('div');
+    element.innerHTML = '<div><div>Hello World</div></div>';
+    const div = element.firstChild.firstChild;
+    const ref = React.createRef();
+    expect(() =>
+      ReactDOM.hydrate(
+        <div>
+          <React.Suspense fallback={null}>
+            <div ref={ref}>Hello World</div>
+          </React.Suspense>
+        </div>,
+        element,
+      ),
+    ).toErrorDev(
+      'Warning: Did not expect server HTML to contain a <div> in <div>.',
+    );
+
+    // The content should've been client rendered and replaced the
+    // existing div.
+    expect(ref.current).not.toBe(div);
+    // The HTML should be the same though.
+    expect(element.innerHTML).toBe('<div><div>Hello World</div></div>');
+  });
+
+  it('Suspense + hydration in legacy mode (at root)', () => {
+    const element = document.createElement('div');
+    element.innerHTML = '<div>Hello World</div>';
+    const div = element.firstChild;
+    const ref = React.createRef();
+    ReactDOM.hydrate(
+      <React.Suspense fallback={null}>
+        <div ref={ref}>Hello World</div>
+      </React.Suspense>,
+      element,
+    );
+
+    // The content should've been client rendered.
+    expect(ref.current).not.toBe(div);
+    // Unfortunately, since we don't delete the tail at the root, a duplicate will remain.
+    expect(element.innerHTML).toBe(
+      '<div>Hello World</div><div>Hello World</div>',
+    );
+  });
+
+  it('Suspense + hydration in legacy mode with no fallback', () => {
+    const element = document.createElement('div');
+    element.innerHTML = '<div>Hello World</div>';
+    const div = element.firstChild;
+    const ref = React.createRef();
+    ReactDOM.hydrate(
+      <React.Suspense>
+        <div ref={ref}>Hello World</div>
+      </React.Suspense>,
+      element,
+    );
+
+    // The content should've been client rendered.
+    expect(ref.current).not.toBe(div);
+    // Unfortunately, since we don't delete the tail at the root, a duplicate will remain.
+    expect(element.innerHTML).toBe(
+      '<div>Hello World</div><div>Hello World</div>',
+    );
+  });
+
+  // regression test for https://github.com/facebook/react/issues/17170
+  it('should not warn if dangerouslySetInnerHtml=undefined', () => {
+    const domElement = document.createElement('div');
+    const reactElement = (
+      <div dangerouslySetInnerHTML={undefined}>
+        <p>Hello, World!</p>
+      </div>
+    );
+    const markup = ReactDOMServer.renderToStaticMarkup(reactElement);
+    domElement.innerHTML = markup;
+
+    ReactDOM.hydrate(reactElement, domElement);
+
+    expect(domElement.innerHTML).toEqual(markup);
+  });
+
+  it('should warn if innerHTML mismatches with dangerouslySetInnerHTML=undefined and children on the client', () => {
+    const domElement = document.createElement('div');
+    const markup = ReactDOMServer.renderToStaticMarkup(
+      <div dangerouslySetInnerHTML={{__html: '<p>server</p>'}} />,
+    );
+    domElement.innerHTML = markup;
+
+    expect(() => {
+      ReactDOM.hydrate(
+        <div dangerouslySetInnerHTML={undefined}>
+          <p>client</p>
+        </div>,
+        domElement,
+      );
+
+      expect(domElement.innerHTML).not.toEqual(markup);
+    }).toErrorDev(
+      'Warning: Text content did not match. Server: "server" Client: "client"',
+    );
+  });
+
+  it('should warn if innerHTML mismatches with dangerouslySetInnerHTML=undefined on the client', () => {
+    const domElement = document.createElement('div');
+    const markup = ReactDOMServer.renderToStaticMarkup(
+      <div dangerouslySetInnerHTML={{__html: '<p>server</p>'}} />,
+    );
+    domElement.innerHTML = markup;
+
+    expect(() => {
+      ReactDOM.hydrate(<div dangerouslySetInnerHTML={undefined} />, domElement);
+
+      expect(domElement.innerHTML).not.toEqual(markup);
+    }).toErrorDev(
+      'Warning: Did not expect server HTML to contain a <p> in <div>',
+    );
+  });
+
+  it('should warn when hydrating read-only properties', () => {
+    const readOnlyProperties = [
+      'offsetParent',
+      'offsetTop',
+      'offsetLeft',
+      'offsetWidth',
+      'offsetHeight',
+      'isContentEditable',
+      'outerText',
+      'outerHTML',
+    ];
+    readOnlyProperties.forEach(readOnlyProperty => {
+      const props = {};
+      props[readOnlyProperty] = 'hello';
+      const jsx = React.createElement('my-custom-element', props);
+      const element = document.createElement('div');
+      element.innerHTML = ReactDOMServer.renderToString(jsx);
+      if (gate(flags => flags.enableCustomElementPropertySupport)) {
+        expect(() => ReactDOM.hydrate(jsx, element)).toErrorDev(
+          `Warning: Assignment to read-only property will result in a no-op: \`${readOnlyProperty}\``,
+        );
+      } else {
+        ReactDOM.hydrate(jsx, element);
+      }
+    });
+  });
+
+  // @gate enableCustomElementPropertySupport
+  it('should not re-assign properties on hydration', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    const jsx = React.createElement('my-custom-element', {
+      str: 'string',
+      obj: {foo: 'bar'},
+    });
+
+    container.innerHTML = ReactDOMServer.renderToString(jsx);
+    const customElement = container.querySelector('my-custom-element');
+
+    // Install setters to activate `in` check
+    Object.defineProperty(customElement, 'str', {
+      set: function(x) {
+        this._str = x;
+      },
+      get: function() {
+        return this._str;
+      },
+    });
+    Object.defineProperty(customElement, 'obj', {
+      set: function(x) {
+        this._obj = x;
+      },
+      get: function() {
+        return this._obj;
+      },
+    });
+
+    ReactDOM.hydrate(jsx, container);
+
+    expect(customElement.getAttribute('str')).toBe('string');
+    expect(customElement.getAttribute('obj')).toBe(null);
+    expect(customElement.str).toBe(undefined);
+    expect(customElement.obj).toBe(undefined);
+  });
+
+  it('refers users to apis that support Suspense when something suspends', () => {
+    const theInfinitePromise = new Promise(() => {});
+    function InfiniteSuspend() {
+      throw theInfinitePromise;
+    }
+
+    function App({isClient}) {
+      return (
+        <div>
+          <React.Suspense fallback={'fallback'}>
+            {isClient ? 'resolved' : <InfiniteSuspend />}
+          </React.Suspense>
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    container.innerHTML = ReactDOMServer.renderToString(
+      <App isClient={false} />,
+    );
+
+    const errors = [];
+    ReactDOMClient.hydrateRoot(container, <App isClient={true} />, {
+      onRecoverableError(error, errorInfo) {
+        errors.push(error.message);
+      },
+    });
+
+    expect(Scheduler).toFlushAndYield([]);
+    expect(errors.length).toBe(1);
+    if (__DEV__) {
+      expect(errors[0]).toBe(
+        'The server did not finish this Suspense boundary: The server used "renderToString" ' +
+          'which does not support Suspense. If you intended for this Suspense boundary to render ' +
+          'the fallback content on the server consider throwing an Error somewhere within the ' +
+          'Suspense boundary. If you intended to have the server wait for the suspended component ' +
+          'please switch to "renderToPipeableStream" which supports Suspense on the server',
+      );
+    } else {
+      expect(errors[0]).toBe(
+        'The server could not finish this Suspense boundary, likely due to ' +
+          'an error during server rendering. Switched to client rendering.',
+      );
+    }
+  });
+
+  it('refers users to apis that support Suspense when something suspends (browser)', () => {
+    const theInfinitePromise = new Promise(() => {});
+    function InfiniteSuspend() {
+      throw theInfinitePromise;
+    }
+
+    function App({isClient}) {
+      return (
+        <div>
+          <React.Suspense fallback={'fallback'}>
+            {isClient ? 'resolved' : <InfiniteSuspend />}
+          </React.Suspense>
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    container.innerHTML = ReactDOMServerBrowser.renderToString(
+      <App isClient={false} />,
+    );
+
+    const errors = [];
+    ReactDOMClient.hydrateRoot(container, <App isClient={true} />, {
+      onRecoverableError(error, errorInfo) {
+        errors.push(error.message);
+      },
+    });
+
+    expect(Scheduler).toFlushAndYield([]);
+    expect(errors.length).toBe(1);
+    if (__DEV__) {
+      expect(errors[0]).toBe(
+        'The server did not finish this Suspense boundary: The server used "renderToString" ' +
+          'which does not support Suspense. If you intended for this Suspense boundary to render ' +
+          'the fallback content on the server consider throwing an Error somewhere within the ' +
+          'Suspense boundary. If you intended to have the server wait for the suspended component ' +
+          'please switch to "renderToReadableStream" which supports Suspense on the server',
+      );
+    } else {
+      expect(errors[0]).toBe(
+        'The server could not finish this Suspense boundary, likely due to ' +
+          'an error during server rendering. Switched to client rendering.',
+      );
+    }
   });
 });

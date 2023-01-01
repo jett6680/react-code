@@ -95,7 +95,8 @@ function getClientEnvironment(publicUrl) {
     }, {}),
     "__DEV__": true,
     "__PROFILE__": true,
-    "__UMD__": true
+    "__UMD__": true,
+    "__EXPERIMENTAL__": true
   };
 
   return { raw, stringified };

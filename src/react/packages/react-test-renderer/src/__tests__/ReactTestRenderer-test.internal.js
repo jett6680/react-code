@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -19,6 +19,7 @@ const prettyFormat = require('pretty-format');
 // Isolate noop renderer
 jest.resetModules();
 const ReactNoop = require('react-noop-renderer');
+const Scheduler = require('scheduler');
 
 // Kind of hacky, but we nullify all the instances to test the tree structure
 // with jasmine's deep equality function, and test the instances separate. We
@@ -270,17 +271,19 @@ describe('ReactTestRenderer', () => {
       return <div>Hello, world</div>;
     }
     class Foo extends React.Component {
+      fooRef = React.createRef();
       render() {
-        return <Bar ref="foo" />;
+        return <Bar ref={this.fooRef} />;
       }
     }
     class Baz extends React.Component {
+      bazRef = React.createRef();
       render() {
-        return <div ref="baz" />;
+        return <div ref={this.bazRef} />;
       }
     }
     ReactTestRenderer.create(<Baz />);
-    expect(() => ReactTestRenderer.create(<Foo />)).toWarnDev(
+    expect(() => ReactTestRenderer.create(<Foo />)).toErrorDev(
       'Warning: Function components cannot be given refs. Attempts ' +
         'to access this ref will fail. ' +
         'Did you mean to use React.forwardRef()?\n\n' +
@@ -297,11 +300,12 @@ describe('ReactTestRenderer', () => {
     const mockAnchorInstance = {hover: () => {}};
     const log = [];
     class Foo extends React.Component {
+      barRef = React.createRef();
       componentDidMount() {
-        log.push(this.refs.bar);
+        log.push(this.barRef.current);
       }
       render() {
-        return <a ref="bar">Hello, world</a>;
+        return <a ref={this.barRef}>Hello, world</a>;
       }
     }
     function createNodeMock(element) {
@@ -354,7 +358,7 @@ describe('ReactTestRenderer', () => {
   it('supports unmounting when using refs', () => {
     class Foo extends React.Component {
       render() {
-        return <div ref="foo" />;
+        return <div ref={React.createRef()} />;
       }
     }
     const inst = ReactTestRenderer.create(<Foo />, {
@@ -393,7 +397,11 @@ describe('ReactTestRenderer', () => {
     };
     class Foo extends React.Component {
       render() {
-        return this.props.useDiv ? <div ref="foo" /> : <span ref="foo" />;
+        return this.props.useDiv ? (
+          <div ref={React.createRef()} />
+        ) : (
+          <span ref={React.createRef()} />
+        );
       }
     }
     const inst = ReactTestRenderer.create(<Foo useDiv={true} />, {
@@ -543,9 +551,9 @@ describe('ReactTestRenderer', () => {
 
   it('toTree() handles nested Fragments', () => {
     const Foo = () => (
-      <React.Fragment>
-        <React.Fragment>foo</React.Fragment>
-      </React.Fragment>
+      <>
+        <>foo</>
+      </>
     );
     const renderer = ReactTestRenderer.create(<Foo />);
     const tree = renderer.toTree();
@@ -706,16 +714,16 @@ describe('ReactTestRenderer', () => {
 
   it('toTree() handles complicated tree of fragments', () => {
     const renderer = ReactTestRenderer.create(
-      <React.Fragment>
-        <React.Fragment>
+      <>
+        <>
           <div>One</div>
           <div>Two</div>
-          <React.Fragment>
+          <>
             <div>Three</div>
-          </React.Fragment>
-        </React.Fragment>
+          </>
+        </>
         <div>Four</div>
-      </React.Fragment>,
+      </>,
     );
 
     const tree = renderer.toTree();
@@ -1011,51 +1019,24 @@ describe('ReactTestRenderer', () => {
     const Context = React.createContext(null);
     const Indirection = React.Fragment;
     const App = () => (
-      <Context.Provider>
+      <Context.Provider value={null}>
         <Indirection>
           <Context.Consumer>{() => null}</Context.Consumer>
         </Indirection>
       </Context.Provider>
     );
     ReactNoop.render(<App />);
-    ReactNoop.flush();
+    expect(Scheduler).toFlushWithoutYielding();
     ReactTestRenderer.create(<App />);
   });
 
-  describe('act', () => {
-    it('can use .act() to batch updates and effects', () => {
-      function App(props) {
-        React.useEffect(() => {
-          props.callback();
-        });
-        return null;
-      }
-      let called = false;
-      ReactTestRenderer.act(() => {
-        ReactTestRenderer.create(
-          <App
-            callback={() => {
-              called = true;
-            }}
-          />,
-        );
-      });
+  it('calling findByType() with an invalid component will fall back to "Unknown" for component name', () => {
+    const App = () => null;
+    const renderer = ReactTestRenderer.create(<App />);
+    const NonComponent = {};
 
-      expect(called).toBe(true);
-    });
-    it('warns and throws if you use TestUtils.act instead of TestRenderer.act in node', () => {
-      // we warn when you try to load 2 renderers in the same 'scope'
-      // so as suggested, we call resetModules() to carry on with the test
-      jest.resetModules();
-      const {act} = require('react-dom/test-utils');
-      expect(() => {
-        expect(() => act(() => {})).toThrow('document is not defined');
-      }).toWarnDev(
-        [
-          'It looks like you called TestUtils.act(...) in a non-browser environment',
-        ],
-        {withoutStack: 1},
-      );
-    });
+    expect(() => {
+      renderer.root.findByType(NonComponent);
+    }).toThrowError(`No instances found with node type: "Unknown"`);
   });
 });

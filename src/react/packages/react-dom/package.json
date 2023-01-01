@@ -1,6 +1,6 @@
 {
   "name": "react-dom",
-  "version": "16.8.6",
+  "version": "18.2.0",
   "description": "React package for working with the DOM.",
   "main": "index.js",
   "repository": {
@@ -18,34 +18,62 @@
   "homepage": "https://reactjs.org/",
   "dependencies": {
     "loose-envify": "^1.1.0",
-    "object-assign": "^4.1.1",
-    "prop-types": "^15.6.2",
-    "scheduler": "^0.13.6"
+    "scheduler": "^0.23.0"
   },
   "peerDependencies": {
-    "react": "^16.0.0"
+    "react": "^18.2.0"
   },
   "files": [
     "LICENSE",
     "README.md",
-    "build-info.json",
     "index.js",
+    "client.js",
     "profiling.js",
     "server.js",
     "server.browser.js",
     "server.node.js",
+    "server.bun.js",
+    "static.js",
+    "static.browser.js",
+    "static.node.js",
+    "server-rendering-stub.js",
     "test-utils.js",
-    "unstable-fire.js",
-    "unstable-fizz.js",
-    "unstable-fizz.browser.js",
-    "unstable-fizz.node.js",
-    "unstable-native-dependencies.js",
+    "unstable_testing.js",
+    "unstable_server-external-runtime.js",
     "cjs/",
     "umd/"
   ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./server": {
+      "bun": "./server.bun.js",
+      "deno": "./server.browser.js",
+      "worker": "./server.browser.js",
+      "browser": "./server.browser.js",
+      "default": "./server.node.js"
+    },
+    "./server.browser": "./server.browser.js",
+    "./server.node": "./server.node.js",
+    "./static": {
+      "deno": "./static.browser.js",
+      "worker": "./static.browser.js",
+      "browser": "./static.browser.js",
+      "default": "./static.node.js"
+    },
+    "./static.browser": "./static.browser.js",
+    "./static.node": "./static.node.js",
+    "./server-rendering-stub": "./server-rendering-stub.js",
+    "./profiling": "./profiling.js",
+    "./test-utils": "./test-utils.js",
+    "./unstable_testing": "./unstable_testing.js",
+    "./unstable_server-external-runtime": "./unstable_server-external-runtime.js",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
   "browser": {
     "./server.js": "./server.browser.js",
-    "./unstable-fizz.js": "./unstable-fizz.browser.js"
+    "./static.js": "./static.browser.js"
   },
   "browserify": {
     "transform": [

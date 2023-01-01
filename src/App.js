@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 // import LifeCycles from './LifeCycles'
 // import HookComponents from './Hook'
 // import ClassComponents from './Class'

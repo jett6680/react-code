@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,35 +7,33 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
+import type {Fiber} from './ReactInternalTypes';
 import type {StackCursor} from './ReactFiberStack';
 import type {Container, HostContext} from './ReactFiberHostConfig';
-
-import invariant from 'shared/invariant';
 
 import {getChildHostContext, getRootHostContext} from './ReactFiberHostConfig';
 import {createCursor, push, pop} from './ReactFiberStack';
 
-declare class NoContextT {}
-const NO_CONTEXT: NoContextT = ({}: any);
-
-let contextStackCursor: StackCursor<HostContext | NoContextT> = createCursor(
-  NO_CONTEXT,
-);
-let contextFiberStackCursor: StackCursor<Fiber | NoContextT> = createCursor(
-  NO_CONTEXT,
-);
-let rootInstanceStackCursor: StackCursor<Container | NoContextT> = createCursor(
-  NO_CONTEXT,
+const contextStackCursor: StackCursor<HostContext | null> = createCursor(null);
+const contextFiberStackCursor: StackCursor<Fiber | null> = createCursor(null);
+const rootInstanceStackCursor: StackCursor<Container | null> = createCursor(
+  null,
 );
 
-function requiredContext<Value>(c: Value | NoContextT): Value {
-  invariant(
-    c !== NO_CONTEXT,
-    'Expected host context to exist. This error is likely caused by a bug ' +
-      'in React. Please file an issue.',
-  );
+function requiredContext<Value>(c: Value | null): Value {
+  if (__DEV__) {
+    if (c === null) {
+      console.error(
+        'Expected host context to exist. This error is likely caused by a bug ' +
+          'in React. Please file an issue.',
+      );
+    }
+  }
   return (c: any);
+}
+
+function getCurrentRootHostContainer(): null | Container {
+  return rootInstanceStackCursor.current;
 }
 
 function getRootHostContainer(): Container {
@@ -56,7 +54,7 @@ function pushHostContainer(fiber: Fiber, nextRootInstance: Container) {
   // we'd have a different number of entries on the stack depending on
   // whether getRootHostContext() throws somewhere in renderer code or not.
   // So we push an empty value first. This lets us safely unwind on errors.
-  push(contextStackCursor, NO_CONTEXT, fiber);
+  push(contextStackCursor, null, fiber);
   const nextRootContext = getRootHostContext(nextRootInstance);
   // Now that we know this function doesn't throw, replace it.
   pop(contextStackCursor, fiber);
@@ -75,11 +73,8 @@ function getHostContext(): HostContext {
 }
 
 function pushHostContext(fiber: Fiber): void {
-  const rootInstance: Container = requiredContext(
-    rootInstanceStackCursor.current,
-  );
   const context: HostContext = requiredContext(contextStackCursor.current);
-  const nextContext = getChildHostContext(context, fiber.type, rootInstance);
+  const nextContext = getChildHostContext(context, fiber.type);
 
   // Don't push this Fiber's context unless it's unique.
   if (context === nextContext) {
@@ -105,6 +100,7 @@ function popHostContext(fiber: Fiber): void {
 
 export {
   getHostContext,
+  getCurrentRootHostContainer,
   getRootHostContainer,
   popHostContainer,
   popHostContext,

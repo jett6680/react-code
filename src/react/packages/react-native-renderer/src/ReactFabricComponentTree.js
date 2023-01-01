@@ -1,20 +1,22 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
-
-import invariant from 'shared/invariant';
 
 function getInstanceFromInstance(instanceHandle) {
   return instanceHandle;
 }
 
 function getTagFromInstance(inst) {
-  let tag = inst.stateNode.canonical._nativeTag;
-  invariant(tag, 'All native instances should have a tag.');
-  return tag;
+  const nativeInstance = inst.stateNode.canonical;
+
+  if (!nativeInstance._nativeTag) {
+    throw new Error('All native instances should have a tag.');
+  }
+
+  return nativeInstance;
 }
 
 export {

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2014-present, Facebook, Inc.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,16 +7,30 @@
  * @flow
  */
 
-import {unstable_scheduleCallback as scheduleCallback} from 'scheduler';
+import * as Scheduler from 'scheduler';
 
-type Entry<T> = {|
+// Intentionally not named imports because Rollup would
+// use dynamic dispatch for CommonJS interop named imports.
+const {
+  unstable_scheduleCallback: scheduleCallback,
+  unstable_IdlePriority: IdlePriority,
+} = Scheduler;
+
+type Entry<T> = {
   value: T,
   onDelete: () => mixed,
   previous: Entry<T>,
   next: Entry<T>,
-|};
+};
 
-export function createLRU<T>(limit: number) {
+type LRU<T> = {
+  add(value: Object, onDelete: () => mixed): Entry<Object>,
+  update(entry: Entry<T>, newValue: T): void,
+  access(entry: Entry<T>): T,
+  setLimit(newLimit: number): void,
+};
+
+export function createLRU<T>(limit: number): LRU<T> {
   let LIMIT = limit;
 
   // Circular, doubly-linked list
@@ -30,7 +44,7 @@ export function createLRU<T>(limit: number) {
       // The cache size exceeds the limit. Schedule a callback to delete the
       // least recently used entries.
       cleanUpIsScheduled = true;
-      scheduleCallback(cleanUp);
+      scheduleCallback(IdlePriority, cleanUp);
     }
   }
 
@@ -43,7 +57,7 @@ export function createLRU<T>(limit: number) {
     // Delete entries from the cache, starting from the end of the list.
     if (first !== null) {
       const resolvedFirst: Entry<T> = (first: any);
-      let last = resolvedFirst.previous;
+      let last: null | Entry<T> = resolvedFirst.previous;
       while (size > targetSize && last !== null) {
         const onDelete = last.onDelete;
         const previous = last.previous;
@@ -70,7 +84,7 @@ export function createLRU<T>(limit: number) {
     }
   }
 
-  function add(value: T, onDelete: () => mixed): Entry<T> {
+  function add(value: Object, onDelete: () => mixed): Entry<Object> {
     const entry = {
       value,
       onDelete,
@@ -128,7 +142,7 @@ export function createLRU<T>(limit: number) {
     return entry.value;
   }
 
-  function setLimit(newLimit: number) {
+  function setLimit(newLimit: number): void {
     LIMIT = newLimit;
     scheduleCleanUp();
   }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,13 +7,9 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
+import type {Fiber} from './ReactInternalTypes';
 
-import warningWithoutStack from 'shared/warningWithoutStack';
-
-export type StackCursor<T> = {
-  current: T,
-};
+export type StackCursor<T> = {current: T};
 
 const valueStack: Array<any> = [];
 
@@ -38,14 +34,14 @@ function isEmpty(): boolean {
 function pop<T>(cursor: StackCursor<T>, fiber: Fiber): void {
   if (index < 0) {
     if (__DEV__) {
-      warningWithoutStack(false, 'Unexpected pop.');
+      console.error('Unexpected pop.');
     }
     return;
   }
 
   if (__DEV__) {
     if (fiber !== fiberStack[index]) {
-      warningWithoutStack(false, 'Unexpected Fiber popped.');
+      console.error('Unexpected Fiber popped.');
     }
   }
 
@@ -75,8 +71,7 @@ function push<T>(cursor: StackCursor<T>, value: T, fiber: Fiber): void {
 function checkThatStackIsEmpty() {
   if (__DEV__) {
     if (index !== -1) {
-      warningWithoutStack(
-        false,
+      console.error(
         'Expected an empty stack. Something was not reset properly.',
       );
     }
