@@ -5,7 +5,7 @@ class UNMount extends React.Component {
   render() {
     return (
       <div>
-        hello worl
+        hello world
       </div>
     )
   }
