@@ -1,12 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-// import List from './List'
-// import Suspense from './Suspense'
-// import MemoComponent from './MemoComponent'
-import App from './App'
+import UNMount from './components/UNMount'
 
 ReactDOM.render(
-  <App />,
+  <UNMount />,
   document.getElementById('root')
 );
 
