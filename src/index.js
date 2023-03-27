@@ -3,7 +3,11 @@ import {  createRoot } from 'react-dom/client';
 import App from './App'
 
 const container = document.getElementById('root')
+createRoot(container).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
 
-createRoot(container).render(<App />)
+)
 
 

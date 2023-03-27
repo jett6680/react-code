@@ -1,5 +1,11 @@
 import * as React from 'react'
-import { flushSync } from "react-dom";
+
+function FunctionCom() {
+  console.log(React.useId())
+  return (
+      <div>FunctionCom</div>
+  )
+}
 
 export default class App extends React.Component {
 
@@ -14,22 +20,16 @@ export default class App extends React.Component {
   handleClick() {
     setTimeout(() => {
 
-      flushSync(() => {
-        this.setState({
-          count: 1
-        })
+      this.setState({
+        count: 1
       })
 
-      flushSync(() => {
-        this.setState({
-          count: 2
-        })
+      this.setState({
+        count: 2
       })
 
-      flushSync(() => {
-        this.setState({
-          count: 3
-        })
+      this.setState({
+        count: 3
       })
 
     }, 0)
@@ -41,6 +41,7 @@ export default class App extends React.Component {
         <div className="app-component-wrap">
           hello world { this.state.count }
           <button onClick={this.handleClick}>点击</button>
+          <FunctionCom />
         </div>
     )
   }
